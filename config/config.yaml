@@ -1,0 +1,44 @@
+camera:
+  index: 0
+  frame_width: 640
+  frame_height: 480
+  fps: 30
+
+models:
+  root: "models"                   # local InsightFace model root
+  pack_name: "buffalo_l"           # model pack name
+  providers: ["CPUExecutionProvider"]   # swap to CUDAExecutionProvider / TensorrtExecutionProvider
+
+detection:
+  confidence_threshold: 0.5
+
+anti_spoofing:
+  enabled: true
+  threshold: 0.90
+  model_path: "models/anti_spoofing/minifasnet_v2.onnx"
+
+recognition:
+  similarity_threshold: 0.45       # cosine similarity cutoff (L2-normalized embeddings)
+  stability_seconds: 1.0           # seconds face must remain recognized before marking
+
+registration:
+  num_samples: 10                  # face samples captured per student
+  sample_delay_ms: 800             # ms between sample captures
+
+attendance:
+  session_based: true              # v1: session-only dedup
+
+database:
+  path: "data/attendance.db"
+
+logging:
+  level: "INFO"                    # DEBUG / INFO / WARNING / ERROR
+  file: "logs/app.log"
+  max_bytes: 5242880               # 5 MB
+  backup_count: 3
+
+gui:
+  theme: "light"                   # light / dark
+  window_title: "Edge AI Attendance System"
+  window_width: 1280
+  window_height: 780
