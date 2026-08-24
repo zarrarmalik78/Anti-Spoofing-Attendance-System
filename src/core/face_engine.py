@@ -48,10 +48,9 @@ class FaceEngine:
             self._app.prepare(ctx_id=0, det_size=(640, 640))
             logger.info(f"Initialized FaceEngine with models from {model_root} and providers {providers}")
             
-            # Anti-Spoofing temporarily disabled to save CPU resources
-            # from src.core.anti_spoofing import AntiSpoofAnalyzer
-            # self.anti_spoof = AntiSpoofAnalyzer(config)
-            self.anti_spoof = None
+            # Anti-Spoofing enabled (PyTorch ensemble, two-model, label==1=Real)
+            from src.core.anti_spoofing import AntiSpoofAnalyzer
+            self.anti_spoof = AntiSpoofAnalyzer(config)
         except Exception as e:
             logger.error(f"Failed to initialize FaceEngine: {e}")
             raise
@@ -78,8 +77,11 @@ class FaceEngine:
                 kps = kpss[i] if kpss is not None else None
                 face = Face(bbox=bbox, kps=kps, det_score=det_score)
                 
-                # 2. Anti-Spoofing Check (Disabled)
-                is_live, liveness_score = True, 1.0
+                # 2. Anti-Spoofing Check
+                if self.anti_spoof is not None:
+                    is_live, liveness_score = self.anti_spoof.analyze(frame, bbox)
+                else:
+                    is_live, liveness_score = True, 1.0
                 
                 if is_live:
                     # 3. Recognition (Embedding generation)

@@ -14,8 +14,11 @@ detection:
 
 anti_spoofing:
   enabled: true
-  threshold: 0.90
-  model_path: "models/anti_spoofing/minifasnet_v2.onnx"
+  # label index 1 = Real/Live (official minivision convention from test.py)
+  # ensemble: 2.7_80x80_MiniFASNetV2.pth + 4_0_0_80x80_MiniFASNetV1SE.pth
+  model_dir: "models/anti_spoofing/pt_models"
+  threshold: 0.5           # liveness_score >= 0.5 → LIVE (normalised across models)
+  diagnostic_every: 0      # set to e.g. 30 to print per-frame debug logs every 30 frames
 
 recognition:
   similarity_threshold: 0.45       # cosine similarity cutoff (L2-normalized embeddings)

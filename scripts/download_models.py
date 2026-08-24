@@ -29,19 +29,24 @@ def download_models():
         else:
             print("\n[ERROR] Something went wrong. The InsightFace model directory is empty.")
             
-        print("\nDownloading Anti-Spoofing Model (MiniFASNetV2)...")
-        anti_spoof_dir = os.path.join(model_root, "anti_spoofing")
+        print("\nDownloading Anti-Spoofing Ensemble Models (PyTorch)...")
+        anti_spoof_dir = os.path.join(model_root, "anti_spoofing", "pt_models")
         if not os.path.exists(anti_spoof_dir):
             os.makedirs(anti_spoof_dir)
             
-        anti_spoof_path = os.path.join(anti_spoof_dir, "minifasnet_v2.onnx")
-        anti_spoof_url = "https://huggingface.co/garciafido/minifasnet-v2-anti-spoofing-onnx/resolve/main/minifasnet_v2.onnx"
+        models_to_download = [
+            ("2.7_80x80_MiniFASNetV2.pth", "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/2.7_80x80_MiniFASNetV2.pth"),
+            ("4_0_0_80x80_MiniFASNetV1SE.pth", "https://github.com/minivision-ai/Silent-Face-Anti-Spoofing/raw/master/resources/anti_spoof_models/4_0_0_80x80_MiniFASNetV1SE.pth")
+        ]
         
-        if not os.path.exists(anti_spoof_path):
-            urllib.request.urlretrieve(anti_spoof_url, anti_spoof_path)
-            print(f"[OK] Anti-Spoofing Model downloaded to {anti_spoof_path}")
-        else:
-            print(f"[OK] Anti-Spoofing Model already exists at {anti_spoof_path}")
+        for model_name, url in models_to_download:
+            path = os.path.join(anti_spoof_dir, model_name)
+            if not os.path.exists(path):
+                print(f"Downloading {model_name}...")
+                urllib.request.urlretrieve(url, path)
+                print(f"[OK] {model_name} downloaded.")
+            else:
+                print(f"[OK] {model_name} already exists.")
             
         print("\n[OK] All models are ready! You can now run the application completely offline.")
 
