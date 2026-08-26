@@ -1,9 +1,58 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900;
+    @apply bg-[#F4F6FA] text-slate-800 antialiased;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   }
+}
+
+/* Custom Scrollbar for smooth UI */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Segmented progress styling */
+.segmented-bar {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.segmented-bar-item {
+  height: 8px;
+  flex: 1;
+  border-radius: 2px;
+  background-color: #E2E8F0;
+  transition: background-color 0.2s ease;
+}
+
+.segmented-bar-item.active {
+  background-color: #10B981;
+}
+
+.segmented-bar-item.warning {
+  background-color: #F59E0B;
+}
+
+.segmented-bar-item.danger {
+  background-color: #EF4444;
 }
