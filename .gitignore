@@ -4,6 +4,12 @@ logs/
 __pycache__/
 *.pyc
 .env
+web/.env
 .venv/
 venv/
 scratch/
+.vs/
+node_modules/
+dist/
+. e n v  
+ 

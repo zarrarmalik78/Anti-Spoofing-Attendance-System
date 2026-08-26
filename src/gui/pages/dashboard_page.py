@@ -6,7 +6,8 @@ import numpy as np
 from src.gui.theme import Theme
 from src.gui.widgets.camera_widget import CameraWidget
 from src.gui.widgets.analytics_card import AnalyticsCard
-from src.core.attendance_manager import AttendanceStatus
+from src.core.attendance_engine import AttendanceStatus
+from src.core.events import EventType
 from src.utils.time_utils import get_current_time
 
 class DashboardPage(ctk.CTkFrame):
@@ -16,9 +17,9 @@ class DashboardPage(ctk.CTkFrame):
         self.app_controller = app_controller
         self.db_manager = services['db_manager']
         self.camera_manager = services['camera_manager']
-        self.face_engine = services['face_engine']
         self.embedding_matcher = services['embedding_matcher']
-        self.attendance_manager = services['attendance_manager']
+        self.ai_engine = services['ai_engine']
+        self.attendance_engine = services['attendance_engine']
         
         self.sim_threshold = self.app_controller.config.get("recognition", {}).get("similarity_threshold", 0.45)
         
@@ -134,36 +135,36 @@ class DashboardPage(ctk.CTkFrame):
             
         display_frame = frame.copy()
 
-        faces = self.face_engine.detect_and_embed(frame)
+        events = self.ai_engine.process_frame(frame)
         current_face_ids = set()
         
-        for face in faces:
-            x1, y1, x2, y2 = map(int, face.bbox)
+        for event in events:
+            x1, y1, x2, y2 = event.bbox
             
-            if not getattr(face, 'is_live', True):
-                label = f"Spoof Detected | FAKE: {(1.0 - getattr(face, 'liveness_score', 0.0))*100:.1f}%"
+            if event.event_type == EventType.SPOOF:
+                label = f"Spoof Detected | FAKE: {(1.0 - event.liveness_score)*100:.1f}%"
                 self._draw_overlay(display_frame, x1, y1, x2, y2, label, 0.0, (0, 0, 255))
                 continue
                 
-            student, score = self.embedding_matcher.match(face.embedding, threshold=self.sim_threshold)
-            
-            if student is None:
-                self._draw_overlay(display_frame, x1, y1, x2, y2, "Unknown", score, (0, 0, 255))
-                self.attendance_manager.increment_unknown()
-            else:
-                current_face_ids.add(student.id)
-                status, progress = self.attendance_manager.on_face_recognized(student.id)
+            if event.event_type == EventType.UNKNOWN:
+                self._draw_overlay(display_frame, x1, y1, x2, y2, "Unknown", event.recognition_confidence, (0, 0, 255))
+                self.attendance_engine.process_event(event)
+                continue
+                
+            if event.event_type == EventType.RECOGNIZED:
+                current_face_ids.add(event.student_id)
+                status, progress = self.attendance_engine.process_event(event)
                 
                 color = (0, 255, 0) if status in [AttendanceStatus.ALREADY_MARKED, AttendanceStatus.NEWLY_MARKED] else (0, 255, 255)
-                label = f"ID: {student.roll_number} | {student.name} | Conf: {score*100:.1f}%"
-                self._draw_overlay(display_frame, x1, y1, x2, y2, label, score, color, status, progress)
+                label = f"ID: {event.student_roll} | {event.student_name} | Conf: {event.recognition_confidence*100:.1f}%"
+                self._draw_overlay(display_frame, x1, y1, x2, y2, label, event.recognition_confidence, color, status, progress)
                 
                 if status == AttendanceStatus.NEWLY_MARKED:
                     self.after(0, self._refresh_data)
                     
         lost_faces = self._last_face_ids - current_face_ids
         for face_id in lost_faces:
-            self.attendance_manager.on_face_lost(face_id)
+            self.attendance_engine.on_face_lost(face_id)
             
         self._last_face_ids = current_face_ids
         return display_frame
@@ -208,9 +209,9 @@ class DashboardPage(ctk.CTkFrame):
 
     def _refresh_data(self):
         # Update Analytics
-        self.card_present.set_value(str(self.attendance_manager.get_present_count()))
+        self.card_present.set_value(str(self.attendance_engine.get_present_count()))
         self.card_registered.set_value(str(self.embedding_matcher.student_count()))
-        self.card_unknown.set_value(str(self.attendance_manager.get_unknown_count()))
+        self.card_unknown.set_value(str(self.attendance_engine.get_unknown_count()))
         
         # Update Table
         for widget in self.scrollable_list.winfo_children():

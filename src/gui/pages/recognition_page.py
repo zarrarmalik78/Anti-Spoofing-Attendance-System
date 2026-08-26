@@ -6,7 +6,8 @@ import math
 
 from src.gui.theme import Theme
 from src.gui.widgets.camera_widget import CameraWidget
-from src.core.attendance_manager import AttendanceStatus
+from src.core.attendance_engine import AttendanceStatus
+from src.core.events import EventType
 
 class RecognitionPage(ctk.CTkFrame):
     def __init__(self, master, app_controller, services: dict, **kwargs):
@@ -14,9 +15,8 @@ class RecognitionPage(ctk.CTkFrame):
         
         self.app_controller = app_controller
         self.camera_manager = services['camera_manager']
-        self.face_engine = services['face_engine']
-        self.embedding_matcher = services['embedding_matcher']
-        self.attendance_manager = services['attendance_manager']
+        self.ai_engine = services['ai_engine']
+        self.attendance_engine = services['attendance_engine']
         self.db_manager = services['db_manager']
         
         self.sim_threshold = self.app_controller.config.get("recognition", {}).get("similarity_threshold", 0.45)
@@ -81,30 +81,37 @@ class RecognitionPage(ctk.CTkFrame):
             
         display_frame = frame.copy()
         
-        faces = self.face_engine.detect_and_embed(frame)
+        events = self.ai_engine.process_frame(frame)
         
         current_face_ids = set()
         
-        for face in faces:
-            x1, y1, x2, y2 = map(int, face.bbox)
+        for event in events:
+            x1, y1, x2, y2 = event.bbox
             
-            if not getattr(face, 'is_live', True):
+            if event.event_type == EventType.SPOOF:
+                # Mock a face object for _draw_spoof which expects an object with liveness_score
+                from collections import namedtuple
+                FaceMock = namedtuple('FaceMock', ['liveness_score'])
+                face = FaceMock(event.liveness_score)
                 self._draw_spoof(display_frame, x1, y1, x2, y2, face)
                 continue
-            
-            # Match
-            student, score = self.embedding_matcher.match(face.embedding, threshold=self.sim_threshold)
-            
-            if student is None:
-                # Unknown
-                self._draw_unknown(display_frame, x1, y1, x2, y2)
-                self.attendance_manager.increment_unknown()
-            else:
-                current_face_ids.add(student.id)
-                # Recognized
-                status, progress = self.attendance_manager.on_face_recognized(student.id)
                 
-                self._draw_recognized(display_frame, x1, y1, x2, y2, student, score, status, progress)
+            if event.event_type == EventType.UNKNOWN:
+                self._draw_unknown(display_frame, x1, y1, x2, y2)
+                self.attendance_engine.process_event(event)
+                continue
+                
+            if event.event_type == EventType.RECOGNIZED:
+                current_face_ids.add(event.student_id)
+                # Recognized
+                status, progress = self.attendance_engine.process_event(event)
+                
+                # Mock a student object for _draw_recognized
+                from collections import namedtuple
+                StudentMock = namedtuple('StudentMock', ['id', 'name', 'roll_number'])
+                student = StudentMock(event.student_id, event.student_name, event.student_roll)
+                
+                self._draw_recognized(display_frame, x1, y1, x2, y2, student, event.recognition_confidence, status, progress)
                 
                 if status == AttendanceStatus.NEWLY_MARKED:
                     self.after(0, self._refresh_log)
@@ -112,7 +119,7 @@ class RecognitionPage(ctk.CTkFrame):
         # Check for lost faces to reset timers
         lost_faces = self._last_face_ids - current_face_ids
         for face_id in lost_faces:
-            self.attendance_manager.on_face_lost(face_id)
+            self.attendance_engine.on_face_lost(face_id)
             
         self._last_face_ids = current_face_ids
         
@@ -206,7 +213,7 @@ class RecognitionPage(ctk.CTkFrame):
         for widget in self.scrollable_log.winfo_children():
             widget.destroy()
             
-        records = self.db_manager.get_session_attendance(self.attendance_manager.session_id)
+        records = self.db_manager.get_session_attendance(self.attendance_engine.session_id)
         
         if not records:
             lbl = ctk.CTkLabel(self.scrollable_log, text="No attendees yet.", text_color=Theme.TEXT_MUTED)

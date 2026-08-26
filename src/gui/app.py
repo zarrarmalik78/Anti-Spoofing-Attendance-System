@@ -14,8 +14,10 @@ from src.database.db_manager import DatabaseManager
 from src.core.camera_manager import CameraManager
 from src.core.face_engine import FaceEngine
 from src.core.embedding_matcher import EmbeddingMatcher
-from src.core.attendance_manager import AttendanceManager
+from src.core.attendance_engine import AttendanceEngine
+from src.core.ai_engine import AIEngine
 from src.core.student_registrar import StudentRegistrar
+from src.firebase.firebase_service import FirebaseService
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -87,12 +89,24 @@ class App(ctk.CTk):
         # Matcher
         self.embedding_matcher = EmbeddingMatcher(self.db_manager)
         
+        # AI Engine
+        sim_threshold = self.config.get("recognition", {}).get("similarity_threshold", 0.45)
+        self.ai_engine = AIEngine(self.face_engine, self.embedding_matcher, sim_threshold)
+        
+        # Firebase integration (Phase 2)
+        self.firebase_service = FirebaseService()
+        
         # Attendance logic
         stab_sec = self.config.get("recognition", {}).get("stability_seconds", 1.0)
-        self.attendance_manager = AttendanceManager(self.db_manager, stab_sec)
+        self.attendance_engine = AttendanceEngine(self.db_manager, self.firebase_service, stab_sec)
         
         # Registrar
-        self.student_registrar = StudentRegistrar(self.face_engine, self.db_manager, self.embedding_matcher)
+        self.student_registrar = StudentRegistrar(
+            self.face_engine, 
+            self.db_manager, 
+            self.embedding_matcher,
+            self.firebase_service
+        )
         
         # Bundle for pages
         self.services = {
@@ -100,7 +114,9 @@ class App(ctk.CTk):
             'camera_manager': self.camera_manager,
             'face_engine': self.face_engine,
             'embedding_matcher': self.embedding_matcher,
-            'attendance_manager': self.attendance_manager,
+            'ai_engine': self.ai_engine,
+            'firebase_service': self.firebase_service,
+            'attendance_engine': self.attendance_engine,
             'student_registrar': self.student_registrar
         }
         logger.info("Services initialized.")

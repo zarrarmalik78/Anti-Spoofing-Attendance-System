@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get the current user's profile from the 'users' collection
+    function getUserProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    // Helper function to check if the user is active
+    function isActive() {
+      return getUserProfile().active == true;
+    }
+    
+    function getRole() {
+      return getUserProfile().role;
+    }
+    
+    function getScope() {
+      return getUserProfile().scope;
+    }
+
+    // Role checking helpers
+    function isAdmin() { return getRole() == 'admin'; }
+    function isVC() { return getRole() == 'vc'; }
+    function isDean() { return getRole() == 'dean'; }
+    function isHOD() { return getRole() == 'hod'; }
+    function isTeacher() { return getRole() == 'teacher'; }
+    function isStudent() { return getRole() == 'student'; }
+
+    // ----------------------------------------------------------------------
+    // Rules
+    // ----------------------------------------------------------------------
+    
+    // Users Profile
+    match /users/{userId} {
+      // Users can read their own profile. Admins can read/write all.
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // Universities
+    match /universities/{univId} {
+      // Anyone authenticated can read (basic info). Admins can write.
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // Faculties
+    match /faculties/{facultyId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // Departments
+    match /departments/{deptId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || (isDean() && getScope().facultyId == resource.data.facultyId));
+    }
+
+    // Programs
+    match /programs/{progId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || (isHOD() && getScope().departmentId == resource.data.departmentId));
+    }
+
+    // Courses
+    match /courses/{courseId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || (isHOD() && getScope().departmentId == resource.data.departmentId));
+    }
+
+    // Classes (Course Offerings)
+    match /classes/{classId} {
+      allow read: if isAuthenticated();
+      // Teachers can update their own classes, HODs can manage their department's classes
+      allow write: if isAuthenticated() && (isAdmin() || (isTeacher() && getScope().departmentId == resource.data.departmentId) || (isHOD() && getScope().departmentId == resource.data.departmentId));
+    }
+
+    // Teachers
+    match /teachers/{teacherId} {
+      // Visible to VC, Dean, HOD, and themselves. Students can view teacher profiles.
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() && (isAdmin() || (isHOD() && getScope().departmentId == resource.data.departmentId));
+    }
+
+    // Students
+    match /students/{studentId} {
+      // Students can only read their own profile or profiles in their classes (simplified: just their own for now)
+      // Teachers, HODs, Deans, VC, Admins can read.
+      allow read: if isAuthenticated() && (
+        isAdmin() || isVC() || isDean() || isHOD() || isTeacher() || 
+        (isStudent() && getScope().studentId == studentId)
+      );
+      allow write: if isAuthenticated() && isAdmin();
+    }
+
+    // Attendance
+    match /attendance/{attendanceId} {
+      // Students can only see their own attendance.
+      // Teachers can see attendance for their classes (would require classId filter, but simplified here)
+      // HODs, Deans, VC, Admins can see all relevant attendance.
+      allow read: if isAuthenticated() && (
+        isAdmin() || isVC() || 
+        (isDean() && getScope().facultyId == resource.data.facultyId) ||
+        (isHOD() && getScope().departmentId == resource.data.departmentId) ||
+        (isTeacher() && getScope().teacherId == resource.data.teacherId) ||
+        (isStudent() && getScope().studentId == resource.data.studentId)
+      );
+      
+      // AI system / Admin can create attendance
+      // Note: Since edge desktop application is writing using REST API without auth in Phase 2/3,
+      // and we want it to keep working, we either need the desktop app to auth as admin
+      // or we leave a generic rule for creation (which we shouldn't in production).
+      // For now, allow creation if authenticated (which AI system might be soon).
+      allow create: if isAuthenticated();
+      allow update, delete: if isAuthenticated() && isAdmin();
+    }
+
+    // Recognition Events (Security logs)
+    match /recognition_events/{eventId} {
+      allow read: if isAuthenticated() && (isAdmin() || isVC() || isDean() || isHOD());
+      allow create: if isAuthenticated();
+    }
+    
+    // System tests (Edge App connection check)
+    match /_system_tests/{testId} {
+      // Allow unrestricted access to the test ping so desktop app can verify connectivity
+      allow read, write: if true;
+    }
+    
+  }
+}

@@ -21,15 +21,18 @@ POSE_INSTRUCTIONS = [
     ("Turn Right More",      "Rotate head further right"),
 ]
 
+from src.firebase.firebase_service import FirebaseService
+
 class StudentRegistrar:
     """
     Handles the registration workflow: capturing multiple face samples,
     averaging them for robustness, and saving to the database.
     """
-    def __init__(self, face_engine: FaceEngine, db_manager: DatabaseManager, matcher: EmbeddingMatcher):
+    def __init__(self, face_engine: FaceEngine, db_manager: DatabaseManager, matcher: EmbeddingMatcher, firebase_service: FirebaseService = None):
         self.face_engine = face_engine
         self.db_manager = db_manager
         self.matcher = matcher
+        self.firebase_service = firebase_service
 
     def capture_sample(self, frame: np.ndarray) -> Tuple[bool, str, Optional[np.ndarray]]:
         """
@@ -86,7 +89,20 @@ class StudentRegistrar:
         
         # Save to DB
         try:
-            self.db_manager.insert_student(name, roll_number, department, final_embedding)
+            student_id = self.db_manager.insert_student(name, roll_number, department, final_embedding)
+            
+            # Save to Firestore (without raw embedding to keep it lightweight)
+            if self.firebase_service:
+                student_data = {
+                    "studentId": student_id,
+                    "name": name,
+                    "rollNumber": roll_number,
+                    "department": department,
+                    "email": f"{roll_number.lower()}@university.edu" # Placeholder for now
+                }
+                # Use document ID as student_id for easy lookup
+                self.firebase_service.create_document("students", student_data, document_id=str(student_id))
+            
             # Reload the matcher immediately so the new student can be recognized
             self.matcher.reload()
             logger.info(f"Successfully registered student {name} with averaged embedding from {len(embeddings)} samples.")
