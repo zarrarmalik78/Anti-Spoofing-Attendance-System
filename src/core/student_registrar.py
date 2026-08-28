@@ -63,20 +63,19 @@ class StudentRegistrar:
 
     def register_student(self, name: str, roll_number: str, department: str, embeddings: List[np.ndarray]) -> bool:
         """
-        Averages the captured embeddings, normalizes, and saves to database.
-        
-        Returns:
-            True if successful
-            Raises Exception if failure (e.g., duplicate roll)
+        Averages the captured embeddings, normalizes, and saves/updates student record in SQLite & Firestore.
+        Sets faceEnrollmentStatus = 'ENROLLED' in Cloud Firestore.
         """
-        if not embeddings:
+        if embeddings is None or (isinstance(embeddings, (list, tuple)) and len(embeddings) == 0):
             raise ValueError("No valid embeddings provided for registration.")
-            
-        if self.db_manager.student_exists(roll_number):
-            raise ValueError(f"Roll number {roll_number} is already registered.")
 
-        # Stack embeddings: shape (num_samples, 512)
-        stacked_embeddings = np.vstack(embeddings)
+        if isinstance(embeddings, np.ndarray):
+            if embeddings.ndim == 1:
+                stacked_embeddings = embeddings.reshape(1, -1)
+            else:
+                stacked_embeddings = embeddings
+        else:
+            stacked_embeddings = np.vstack(embeddings)
         
         # Compute mean along the sample axis: shape (512,)
         mean_embedding = np.mean(stacked_embeddings, axis=0)
@@ -87,25 +86,32 @@ class StudentRegistrar:
             raise ValueError("Computed mean embedding has zero norm.")
         final_embedding = mean_embedding / norm
         
-        # Save to DB
+        # Save or update SQLite DB
         try:
-            student_id = self.db_manager.insert_student(name, roll_number, department, final_embedding)
+            if self.db_manager.student_exists(roll_number):
+                student_id = self.db_manager.update_student_embedding(roll_number, name, department, final_embedding)
+            else:
+                student_id = self.db_manager.insert_student(name, roll_number, department, final_embedding)
             
-            # Save to Firestore (without raw embedding to keep it lightweight)
+            # Sync enrollment status to Cloud Firestore
             if self.firebase_service:
+                import time
                 student_data = {
-                    "studentId": student_id,
+                    "studentId": roll_number,
                     "name": name,
                     "rollNumber": roll_number,
-                    "department": department,
-                    "email": f"{roll_number.lower()}@university.edu" # Placeholder for now
+                    "departmentId": department if "dept-" in department else "dept-cs-01",
+                    "faceEnrollmentStatus": "ENROLLED",
+                    "embeddingEnrolled": True,
+                    "enrolledAt": str(time.strftime('%Y-%m-%dT%H:%M:%SZ'))
                 }
-                # Use document ID as student_id for easy lookup
-                self.firebase_service.create_document("students", student_data, document_id=str(student_id))
+                import re
+                clean_roll = re.sub(r'[^a-zA-Z0-9]', '', str(roll_number)).lower()
+                self.firebase_service.create_document("students", student_data, document_id=f"student-{clean_roll}")
             
-            # Reload the matcher immediately so the new student can be recognized
+            # Reload the matcher immediately so the student can be recognized live
             self.matcher.reload()
-            logger.info(f"Successfully registered student {name} with averaged embedding from {len(embeddings)} samples.")
+            logger.info(f"Successfully registered student {name} ({roll_number}) with face enrollment status ENROLLED.")
             return True
         except Exception as e:
             logger.error(f"Failed to register student: {e}")

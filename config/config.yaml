@@ -41,7 +41,7 @@ logging:
   backup_count: 3
 
 gui:
-  theme: "light"                   # light / dark
-  window_title: "Edge AI Attendance System"
-  window_width: 1280
-  window_height: 780
+  theme: "dark"                    # light / dark
+  window_title: "Edge AI Biometric Attendance & Security OS"
+  window_width: 1320
+  window_height: 820

@@ -17,3 +17,13 @@ CREATE TABLE IF NOT EXISTS attendance (
 CREATE INDEX IF NOT EXISTS idx_attendance_student ON attendance(student_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_session ON attendance(session_id);
 CREATE INDEX IF NOT EXISTS idx_attendance_date    ON attendance(marked_at);
+
+CREATE TABLE IF NOT EXISTS offline_queue (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection  TEXT NOT NULL,
+    document_id TEXT,
+    data_json   TEXT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    retry_count INTEGER DEFAULT 0
+);
+

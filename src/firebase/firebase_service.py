@@ -1,5 +1,8 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import json
+import time
 import threading
 from typing import Dict, Any, Optional, List
 
@@ -21,6 +24,13 @@ class FirebaseService:
         self.current_user: Optional[Dict[str, Any]] = None
         self.id_token: Optional[str] = None
         
+        # Setup persistent session with pooling and retries
+        self.session = requests.Session()
+        retries = Retry(total=3, backoff_factor=0.3, status_forcelist=[500, 502, 503, 504])
+        adapter = HTTPAdapter(pool_connections=25, pool_maxsize=25, max_retries=retries)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+        
         self.is_connected = False
         self._test_connection()
 
@@ -31,39 +41,43 @@ class FirebaseService:
             return
 
         def _run_test():
-            try:
-                # Basic connection test
-                response = requests.get(f"{self.firestore_url}?key={self.config.API_KEY}", timeout=5)
-                self.is_connected = True
-                logger.info("Firebase connected successfully via REST API.")
-                
-                # Full Read/Write Test
-                logger.info("Running Firebase Read/Write test...")
-                test_doc_id = "test_connection_doc"
-                test_data = {"status": "success", "timestamp": str(threading.get_ident())}
-                
-                # Write (using PATCH to allow overwriting)
-                firestore_data = self._to_firestore_format(test_data)
-                url = f"{self.firestore_url}/_system_tests/{test_doc_id}?key={self.config.API_KEY}"
-                requests.patch(url, json=firestore_data, timeout=5)
-                
-                # Read
-                get_url = f"{self.firestore_url}/_system_tests/{test_doc_id}?key={self.config.API_KEY}"
-                get_resp = requests.get(get_url, timeout=5)
-                if get_resp.status_code == 200:
-                    read_data = self._from_firestore_format(get_resp.json())
-                    if read_data.get("status") == "success":
-                        logger.info("Firebase Read/Write test SUCCESSFUL.")
-                    else:
-                        logger.warning("Firebase Read/Write test failed: Data mismatch.")
-                elif get_resp.status_code == 403:
-                    logger.warning("Firebase Read/Write test failed with 403 Forbidden. Please check your Firestore Security Rules (allow read, write).")
-                else:
-                    logger.warning(f"Firebase Read/Write test failed: Read returned {get_resp.status_code}")
+            for attempt in range(3):
+                try:
+                    # Basic connection test
+                    response = self.session.get(f"{self.firestore_url}?key={self.config.API_KEY}", timeout=15)
+                    self.is_connected = True
+                    logger.info("Firebase connected successfully via REST API.")
                     
-            except Exception as e:
-                logger.error(f"Failed to connect to Firebase: {e}")
-                self.is_connected = False
+                    # Full Read/Write Test
+                    logger.info("Running Firebase Read/Write test...")
+                    test_doc_id = "test_connection_doc"
+                    test_data = {"status": "success", "timestamp": str(threading.get_ident())}
+                    
+                    # Write (using PATCH to allow overwriting)
+                    firestore_data = self._to_firestore_format(test_data)
+                    url = f"{self.firestore_url}/_system_tests/{test_doc_id}?key={self.config.API_KEY}"
+                    self.session.patch(url, json=firestore_data, timeout=15)
+                    
+                    # Read
+                    get_url = f"{self.firestore_url}/_system_tests/{test_doc_id}?key={self.config.API_KEY}"
+                    get_resp = self.session.get(get_url, timeout=15)
+                    if get_resp.status_code == 200:
+                        read_data = self._from_firestore_format(get_resp.json())
+                        if read_data.get("status") == "success":
+                            logger.info("Firebase Read/Write test SUCCESSFUL.")
+                            return
+                        else:
+                            logger.warning("Firebase Read/Write test failed: Data mismatch.")
+                    elif get_resp.status_code == 403:
+                        logger.warning("Firebase Read/Write test failed with 403 Forbidden. Please check your Firestore Security Rules (allow read, write).")
+                    else:
+                        logger.warning(f"Firebase Read/Write test failed: Read returned {get_resp.status_code}")
+                    return
+                except Exception as e:
+                    if attempt == 2:
+                        logger.error(f"Failed to connect to Firebase: {e}")
+                        self.is_connected = False
+                    time.sleep(1.0)
 
         threading.Thread(target=_run_test, daemon=True).start()
 
@@ -83,7 +97,7 @@ class FirebaseService:
             "returnSecureToken": True
         }
         try:
-            response = requests.post(url, json=payload, timeout=5)
+            response = self.session.post(url, json=payload, timeout=15)
             response.raise_for_status()
             data = response.json()
             return data.get("localId")
@@ -107,7 +121,7 @@ class FirebaseService:
             "returnSecureToken": True
         }
         try:
-            response = requests.post(url, json=payload, timeout=5)
+            response = self.session.post(url, json=payload, timeout=15)
             response.raise_for_status()
             data = response.json()
             
@@ -225,12 +239,38 @@ class FirebaseService:
     # Cloud Firestore Operations
     # ---------------------------------------------------------
 
+    def attach_db_manager(self, db_manager):
+        """Attaches DatabaseManager for local offline queue fallback."""
+        self.db_manager = db_manager
+        self._start_offline_sync_loop()
+
+    def _start_offline_sync_loop(self):
+        def _sync_worker():
+            while True:
+                time.sleep(15.0)
+                if not hasattr(self, 'db_manager') or self.db_manager is None:
+                    continue
+                try:
+                    offline_items = self.db_manager.get_offline_items(limit=30)
+                    if not offline_items:
+                        continue
+                    logger.info(f"Flushing {len(offline_items)} offline queued items to Cloud Firestore...")
+                    for item in offline_items:
+                        success = self.create_document_sync(item['collection'], item['data'], item['document_id'])
+                        if success:
+                            self.db_manager.delete_offline_item(item['id'])
+                except Exception as e:
+                    logger.debug(f"Offline sync check encountered temporary error: {e}")
+        
+        threading.Thread(target=_sync_worker, daemon=True).start()
+
     def create_document(self, collection: str, data: Dict[str, Any], document_id: Optional[str] = None) -> bool:
         """
         Creates a document in Firestore.
         Uses a background thread to prevent blocking the UI/AI loop.
+        Buffers to local SQLite queue if write fails due to network outage.
         """
-        if not self.is_connected:
+        if not self.config.is_valid():
             return False
 
         def _worker():
@@ -241,92 +281,118 @@ class FirebaseService:
                     headers["Authorization"] = f"Bearer {self.id_token}"
                 
                 if document_id:
-                    # POST with documentId query param
                     url = f"{self.firestore_url}/{collection}?documentId={document_id}&key={self.config.API_KEY}"
-                    response = requests.post(url, json=firestore_data, headers=headers, timeout=5)
+                    response = self.session.post(url, json=firestore_data, headers=headers, timeout=10)
                 else:
-                    # POST to generate random ID
                     url = f"{self.firestore_url}/{collection}?key={self.config.API_KEY}"
-                    response = requests.post(url, json=firestore_data, headers=headers, timeout=5)
+                    response = self.session.post(url, json=firestore_data, headers=headers, timeout=10)
                     
                 response.raise_for_status()
                 logger.debug(f"Successfully wrote to {collection}")
             except Exception as e:
-                logger.error(f"Firestore write failed for {collection}: {e}")
+                logger.warning(f"Firestore write failed for {collection}: {e}. Buffering to local offline queue...")
+                if hasattr(self, 'db_manager') and self.db_manager:
+                    self.db_manager.enqueue_offline_item(collection, data, document_id)
 
         # Fire and forget
         threading.Thread(target=_worker, daemon=True).start()
         return True
 
     def create_document_sync(self, collection: str, data: Dict[str, Any], document_id: Optional[str] = None) -> bool:
-        """Synchronously creates a document in Firestore (useful for seeding)."""
+        """Synchronously creates a document in Firestore with retry."""
         if not self.config.is_valid():
             return False
 
-        try:
-            firestore_data = self._to_firestore_format(data)
-            headers = {}
-            if self.id_token:
-                headers["Authorization"] = f"Bearer {self.id_token}"
-            
-            if document_id:
-                # POST with documentId query param
-                url = f"{self.firestore_url}/{collection}?documentId={document_id}&key={self.config.API_KEY}"
-                response = requests.post(url, json=firestore_data, headers=headers, timeout=5)
-                # Fallback to PATCH if it already exists and we want to overwrite
-                if response.status_code == 409: # CONFLICT
-                    url = f"{self.firestore_url}/{collection}/{document_id}?key={self.config.API_KEY}"
-                    response = requests.patch(url, json=firestore_data, headers=headers, timeout=5)
-            else:
-                # POST to generate random ID
-                url = f"{self.firestore_url}/{collection}?key={self.config.API_KEY}"
-                response = requests.post(url, json=firestore_data, headers=headers, timeout=5)
-                
-            response.raise_for_status()
-            logger.debug(f"Successfully wrote to {collection}")
-            return True
-        except Exception as e:
-            logger.error(f"Firestore write failed for {collection}: {e}")
-            return False
+        firestore_data = self._to_firestore_format(data)
+        headers = {}
+        if self.id_token:
+            headers["Authorization"] = f"Bearer {self.id_token}"
+        
+        for attempt in range(2):
+            try:
+                if document_id:
+                    url = f"{self.firestore_url}/{collection}?documentId={document_id}&key={self.config.API_KEY}"
+                    response = self.session.post(url, json=firestore_data, headers=headers, timeout=10)
+                    if response.status_code == 409: # CONFLICT / already exists
+                        url = f"{self.firestore_url}/{collection}/{document_id}?key={self.config.API_KEY}"
+                        response = self.session.patch(url, json=firestore_data, headers=headers, timeout=10)
+                else:
+                    url = f"{self.firestore_url}/{collection}?key={self.config.API_KEY}"
+                    response = self.session.post(url, json=firestore_data, headers=headers, timeout=10)
+                    
+                response.raise_for_status()
+                logger.debug(f"Successfully wrote to {collection}")
+                return True
+            except Exception as e:
+                if attempt == 1:
+                    logger.warning(f"Firestore sync write failed for {collection}: {e}")
+                    return False
+                time.sleep(0.3)
+        return False
 
     def get_document(self, collection: str, document_id: str) -> Optional[Dict[str, Any]]:
-        """Synchronously fetches a document from Firestore."""
-        if not self.is_connected:
+        """Synchronously fetches a document from Firestore with retry."""
+        if not self.config.is_valid():
             return None
             
-        try:
-            url = f"{self.firestore_url}/{collection}/{document_id}?key={self.config.API_KEY}"
-            headers = {}
-            if self.id_token:
-                headers["Authorization"] = f"Bearer {self.id_token}"
-                
-            response = requests.get(url, headers=headers, timeout=5)
-            if response.status_code == 404:
-                return None
-            response.raise_for_status()
+        headers = {}
+        if self.id_token:
+            headers["Authorization"] = f"Bearer {self.id_token}"
             
-            return self._from_firestore_format(response.json())
-        except Exception as e:
-            logger.error(f"Firestore read failed for {collection}/{document_id}: {e}")
-            return None
+        url = f"{self.firestore_url}/{collection}/{document_id}?key={self.config.API_KEY}"
+        for attempt in range(3):
+            try:
+                response = self.session.get(url, headers=headers, timeout=15)
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                return self._from_firestore_format(response.json())
+            except Exception as e:
+                if attempt == 2:
+                    logger.error(f"Firestore read failed for {collection}/{document_id}: {e}")
+                    return None
+                time.sleep(0.3 * (attempt + 1))
+        return None
 
-    def list_documents(self, collection: str) -> List[Dict[str, Any]]:
-        """Synchronously fetches all documents in a collection."""
-        if not self.is_connected:
+    def list_documents(self, collection: str, page_size: int = 300) -> List[Dict[str, Any]]:
+        """Synchronously fetches all documents in a collection, handling pagination."""
+        if not self.config.is_valid():
             return []
             
         try:
-            url = f"{self.firestore_url}/{collection}?key={self.config.API_KEY}"
+            documents = []
+            page_token = None
             headers = {}
             if self.id_token:
                 headers["Authorization"] = f"Bearer {self.id_token}"
                 
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            documents = data.get("documents", [])
-            return [self._from_firestore_format(doc) for doc in documents]
+            while True:
+                token_param = f"&pageToken={page_token}" if page_token else ""
+                url = f"{self.firestore_url}/{collection}?pageSize={page_size}&key={self.config.API_KEY}{token_param}"
+                
+                resp = None
+                for attempt in range(3):
+                    try:
+                        resp = self.session.get(url, headers=headers, timeout=15)
+                        break
+                    except Exception as e:
+                        if attempt == 2:
+                            raise e
+                        time.sleep(0.3 * (attempt + 1))
+
+                if resp is None or resp.status_code == 404:
+                    break
+                resp.raise_for_status()
+                
+                data = resp.json()
+                docs = data.get("documents", [])
+                documents.extend([self._from_firestore_format(doc) for doc in docs])
+                
+                page_token = data.get("nextPageToken")
+                if not page_token:
+                    break
+                    
+            return documents
         except Exception as e:
             logger.error(f"Firestore list failed for {collection}: {e}")
             return []
@@ -336,17 +402,12 @@ class FirebaseService:
         Updates a document in Firestore.
         Uses a background thread.
         """
-        if not self.is_connected:
+        if not self.config.is_valid():
             return False
 
         def _worker():
             try:
-                # To update, we use PATCH. 
-                # In Firestore REST API, we must specify updateMask fields to prevent overwriting the entire document
-                # But to keep it simple, we can just do a partial update. 
                 firestore_data = self._to_firestore_format(data)
-                
-                # Build updateMask query params
                 update_mask = ""
                 for key in data.keys():
                     update_mask += f"&updateMask.fieldPaths={key}"
@@ -357,7 +418,7 @@ class FirebaseService:
                 if self.id_token:
                     headers["Authorization"] = f"Bearer {self.id_token}"
                     
-                response = requests.patch(url, json=firestore_data, headers=headers, timeout=5)
+                response = self.session.patch(url, json=firestore_data, headers=headers, timeout=15)
                 response.raise_for_status()
                 logger.debug(f"Successfully updated {collection}/{document_id}")
             except Exception as e:
@@ -369,3 +430,27 @@ class FirebaseService:
     def soft_delete_document(self, collection: str, document_id: str) -> bool:
         """Sets active=False on a document."""
         return self.update_document(collection, document_id, {"active": False})
+
+    def delete_document_sync(self, collection: str, document_id: str) -> bool:
+        """Synchronously deletes a document from Firestore with retry."""
+        if not self.config.is_valid():
+            return False
+            
+        url = f"{self.firestore_url}/{collection}/{document_id}?key={self.config.API_KEY}"
+        headers = {}
+        if self.id_token:
+            headers["Authorization"] = f"Bearer {self.id_token}"
+            
+        for attempt in range(3):
+            try:
+                response = self.session.delete(url, headers=headers, timeout=15)
+                response.raise_for_status()
+                logger.debug(f"Successfully deleted {collection}/{document_id}")
+                return True
+            except Exception as e:
+                if attempt == 2:
+                    logger.error(f"Firestore delete failed for {collection}/{document_id}: {e}")
+                    return False
+                time.sleep(0.3 * (attempt + 1))
+        return False
+

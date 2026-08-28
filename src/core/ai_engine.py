@@ -47,10 +47,16 @@ class AIEngine:
             liveness_score = getattr(face, 'liveness_score', 1.0)
             
             if not is_live:
+                # Perform embedding matching to check if the spoofed face belongs to a registered student
+                student, score = self.embedding_matcher.match(face.embedding, threshold=self.similarity_threshold) if face.embedding is not None else (None, 0.0)
                 events.append(RecognitionEvent(
                     timestamp=timestamp,
                     bbox=bbox,
                     event_type=EventType.SPOOF,
+                    student_id=student.id if student else None,
+                    student_name=student.name if student else None,
+                    student_roll=student.roll_number if student else None,
+                    recognition_confidence=score if student else 0.0,
                     is_live=is_live,
                     liveness_score=liveness_score,
                     camera_id=self.camera_id,

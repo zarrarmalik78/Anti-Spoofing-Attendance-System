@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ShieldAlert, X, Bell } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { collection, getDocs, query, limit } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 
 interface NotificationItem {
   id: string;
@@ -18,41 +20,69 @@ interface NotificationPopoverProps {
 
 export const NotificationPopover: React.FC<NotificationPopoverProps> = ({ isOpen, onClose }) => {
   const [activeTab, setActiveTab] = useState<'alerts' | 'activity'>('alerts');
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchLiveNotifications();
+    }
+  }, [isOpen]);
+
+  const fetchLiveNotifications = async () => {
+    setLoading(true);
+    try {
+      const [attSnap, recSnap] = await Promise.all([
+        getDocs(query(collection(db, 'attendance'), limit(20))),
+        getDocs(query(collection(db, 'recognition_events'), limit(20))),
+      ]);
+
+      const items: NotificationItem[] = [];
+
+      recSnap.docs.forEach((doc) => {
+        const d = doc.data();
+        items.push({
+          id: `rec-${doc.id}`,
+          title: d.eventType === 'SPOOF_ATTACK' ? 'Anti-Spoofing Alert' : 'Biometric Event',
+          subtitle: d.eventType === 'SPOOF_ATTACK'
+            ? `Spoof attack blocked on ${d.cameraId || 'USB CAM #0'} (Liveness: ${Math.round((d.livenessScore || 0.15) * 100)}%)`
+            : `${d.studentName || 'Student'} verified on camera ${d.cameraId || '#0'}`,
+          time: d.timestamp ? new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+          type: d.eventType === 'SPOOF_ATTACK' ? 'spoof' : 'recognized',
+        });
+      });
+
+      attSnap.docs.forEach((doc) => {
+        const d = doc.data();
+        items.push({
+          id: `att-${doc.id}`,
+          title: 'Student Verified',
+          subtitle: `${d.studentName || 'Student'} (${d.rollNumber || d.studentId || '5022'}) checked in via Edge Camera`,
+          time: d.timestamp ? new Date(d.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now',
+          type: 'recognized',
+          avatar: d.avatar,
+        });
+      });
+
+      if (items.length === 0) {
+        items.push({
+          id: 'sys-1',
+          title: 'Edge AI System Online',
+          subtitle: 'Camera nodes and local sync queue operating normally',
+          time: 'Active',
+          type: 'system',
+        });
+      }
+
+      setNotifications(items);
+    } catch (err) {
+      console.error('Failed to fetch live notifications:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (!isOpen) return null;
-
-  const notifications: NotificationItem[] = [
-    {
-      id: '1',
-      title: 'Anti-Spoofing Alert',
-      subtitle: 'Photo spoof attempt blocked on WEBCAM-01 (Liveness: 14%)',
-      time: '08:30 AM',
-      type: 'spoof',
-    },
-    {
-      id: '2',
-      title: 'Student Verified',
-      subtitle: 'Ali Khan checked in for BSCS 6A - Artificial Intelligence',
-      time: '08:28 AM',
-      type: 'recognized',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-    },
-    {
-      id: '3',
-      title: 'Edge Node Sync',
-      subtitle: 'LAPTOP-01 synced 15 attendance records to Cloud Firestore',
-      time: '08:15 AM',
-      type: 'system',
-    },
-    {
-      id: '4',
-      title: 'Student Verified',
-      subtitle: 'Sara Ahmed checked in for BSCS 6A - Web Engineering',
-      time: '08:04 AM',
-      type: 'recognized',
-      avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
-    },
-  ];
 
   return (
     <>
@@ -62,7 +92,7 @@ export const NotificationPopover: React.FC<NotificationPopoverProps> = ({ isOpen
           <div className="flex items-center gap-2">
             <h3 className="font-bold text-slate-900 text-base">Live Activity & Alerts</h3>
             <span className="bg-brand-50 text-brand-600 text-xs px-2 py-0.5 rounded-full font-bold">
-              4 New
+              {loading ? 'Syncing...' : `${notifications.length} Live`}
             </span>
           </div>
           <button

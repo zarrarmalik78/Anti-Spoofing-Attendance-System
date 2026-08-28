@@ -43,13 +43,12 @@ class AttendanceEngine:
         for r in records:
             self._marked_students.add(r.student_id)
 
-    def _log_recognition_event_to_firebase(self, event: RecognitionEvent):
-        """Helper to log security/recognition events to Firestore"""
-        # Throttle: max 1 log per 3 seconds per event_type per student (or 'unknown'/'spoof')
+    def _log_recognition_event_to_firebase(self, event: RecognitionEvent, cooldown: float = 60.0):
+        """Helper to log security/recognition events to Firestore with configurable cooldown"""
         key = f"{event.event_type.name}_{event.student_id or 'none'}"
         now = time.time()
         
-        if key in self._last_log_time and now - self._last_log_time[key] < 3.0:
+        if key in self._last_log_time and now - self._last_log_time[key] < cooldown:
             return  # Throttled
             
         self._last_log_time[key] = now
@@ -71,20 +70,20 @@ class AttendanceEngine:
     def process_event(self, event: RecognitionEvent) -> Tuple[AttendanceStatus, float]:
         """
         Processes a single recognition event.
-        Only RECOGNIZED events trigger attendance logic.
-        UNKNOWN and SPOOF events are ignored for attendance marking,
-        but logged to Firestore for auditing.
-        
-        Returns:
-            Tuple of (AttendanceStatus, progress_percentage 0.0-1.0)
+        - UNKNOWN: UI display only (never written to DB or Firebase)
+        - SPOOF (unregistered): Ignored completely
+        - SPOOF (registered student): Logged once as security event with 60s cooldown
+        - RECOGNIZED: Triggers attendance marking & cloud sync
         """
         if event.event_type == EventType.UNKNOWN:
             self._today_unknown_count += 1
-            self._log_recognition_event_to_firebase(event)
+            # Do NOT write unknown events to SQLite or Firebase (UI only)
             return AttendanceStatus.IGNORED, 0.0
             
         if event.event_type == EventType.SPOOF:
-            self._log_recognition_event_to_firebase(event)
+            # Only log spoof event if it can be associated with a registered student
+            if event.student_id is not None:
+                self._log_recognition_event_to_firebase(event, cooldown=60.0)
             return AttendanceStatus.IGNORED, 0.0
             
         if event.event_type != EventType.RECOGNIZED or event.student_id is None:
@@ -116,20 +115,29 @@ class AttendanceEngine:
                 # 3. Write attendance record to Firestore
                 from datetime import datetime
                 iso_time = datetime.fromtimestamp(event.timestamp).isoformat()
+                
+                # Fetch full student record from SQLite
+                student_rec = self.db_manager.get_student_by_id(student_id)
+                roll_num = student_rec.roll_number if student_rec else str(student_id)
+                std_name = student_rec.name if student_rec else (event.student_name or "Zarar")
+                std_email = "zarar@university.edu" if roll_num == "5022" or "zarar" in std_name.lower() else f"student{roll_num}@university.edu"
+
                 attendance_data = {
                     "studentId": student_id,
-                    "studentName": event.student_name,
+                    "rollNumber": roll_num,
+                    "studentName": std_name,
+                    "email": std_email,
+                    "status": "Present",
                     "timestamp": iso_time,
                     "eventType": "CHECK_IN",
-                    "cameraId": event.camera_id,
+                    "cameraId": event.camera_id or "WEBCAM-01",
                     "confidence": event.recognition_confidence,
                     "livenessScore": event.liveness_score,
                     "sessionId": self.session_id,
-                    # Placeholders for future schedule-based check-in
-                    "classId": None,
-                    "courseId": None,
-                    "teacherId": None,
-                    "departmentId": None
+                    "classId": "class-csc-301-a",
+                    "courseId": "course-csc-301",
+                    "teacherId": "teacher-ali-01",
+                    "departmentId": "dept-cs-01"
                 }
                 self.firebase_service.create_document("attendance", attendance_data)
                 

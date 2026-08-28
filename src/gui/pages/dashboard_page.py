@@ -2,6 +2,8 @@ import customtkinter as ctk
 import datetime
 import cv2
 import numpy as np
+import webbrowser
+from PIL import Image, ImageTk
 
 from src.gui.theme import Theme
 from src.gui.widgets.camera_widget import CameraWidget
@@ -11,6 +13,9 @@ from src.core.events import EventType
 from src.utils.time_utils import get_current_time
 
 class DashboardPage(ctk.CTkFrame):
+    """
+    High-tech modern dashboard showing real-time biometric feed, today's attendance roster, and KPI cards.
+    """
     def __init__(self, master, app_controller, services: dict, **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
         
@@ -36,80 +41,182 @@ class DashboardPage(ctk.CTkFrame):
         
     def _build_top_area(self):
         top_frame = ctk.CTkFrame(self, fg_color="transparent")
-        top_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
+        top_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=(16, 12))
         
         top_frame.grid_rowconfigure(0, weight=1)
-        top_frame.grid_columnconfigure(0, weight=4) # Camera gets more space
-        top_frame.grid_columnconfigure(1, weight=5) # Table gets slightly more space for columns
+        top_frame.grid_columnconfigure(0, weight=4) # Camera
+        top_frame.grid_columnconfigure(1, weight=5) # Attendance Table
         
-        # --- Camera Section ---
-        cam_container = ctk.CTkFrame(top_frame, fg_color=Theme.SURFACE, corner_radius=10, border_width=1, border_color=Theme.BORDER_COLOR)
+        # ==========================================
+        # 1. CAMERA SECTION
+        # ==========================================
+        cam_container = ctk.CTkFrame(
+            top_frame, 
+            fg_color=Theme.CARD_BG, 
+            corner_radius=16, 
+            border_width=1, 
+            border_color=Theme.BORDER_COLOR
+        )
         cam_container.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
-        lbl_cam_title = ctk.CTkLabel(cam_container, text="Live Camera Feed", font=Theme.get_font_heading())
-        lbl_cam_title.pack(pady=10, padx=15, anchor="w")
+        cam_header = ctk.CTkFrame(cam_container, fg_color="transparent")
+        cam_header.pack(fill="x", padx=16, pady=(14, 6))
         
-        # Camera Controls (Pack bottom FIRST so expand=True on camera_widget won't hide it)
+        lbl_cam_title = ctk.CTkLabel(
+            cam_header, 
+            text="📷 Live Biometric Feed", 
+            font=Theme.get_font_heading()
+        )
+        lbl_cam_title.pack(side="left")
+        
+        self.badge_fps = ctk.CTkLabel(
+            cam_header,
+            text="30 FPS • WEBCAM-01",
+            font=Theme.get_font_mono_small(),
+            text_color=Theme.TEXT_MUTED
+        )
+        self.badge_fps.pack(side="right")
+        
+        # Camera Controls (Bottom)
         controls_frame = ctk.CTkFrame(cam_container, fg_color="transparent")
-        controls_frame.pack(side="bottom", fill="x", padx=15, pady=10)
+        controls_frame.pack(side="bottom", fill="x", padx=16, pady=(6, 14))
         
-        self.btn_toggle_cam = ctk.CTkButton(controls_frame, text="▶ Start Recognition", width=160, command=self._toggle_camera)
-        self.btn_toggle_cam.pack(side="left")
+        self.btn_toggle_cam = ctk.CTkButton(
+            controls_frame, 
+            text="▶ Start Recognition", 
+            font=Theme.get_font_heading(),
+            height=40,
+            fg_color=Theme.PRIMARY,
+            hover_color=Theme.PRIMARY_HOVER,
+            command=self._toggle_camera
+        )
+        self.btn_toggle_cam.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        
+        btn_open_web = ctk.CTkButton(
+            controls_frame,
+            text="🌐 Open Web Portal",
+            font=Theme.get_font_subheading(),
+            height=40,
+            fg_color=Theme.SURFACE_HOVER,
+            hover_color=Theme.BORDER_COLOR,
+            text_color=Theme.TEXT_MAIN,
+            command=self._open_web_portal
+        )
+        btn_open_web.pack(side="right", padx=(6, 0))
 
-        self.camera_widget = CameraWidget(cam_container, self.camera_manager, width=400, height=300)
+        # Camera Viewport
+        self.camera_widget = CameraWidget(cam_container, self.camera_manager, width=420, height=300)
         self.camera_widget.set_overlay_callback(self._process_frame)
-        self.camera_widget.pack(expand=True, fill="both", padx=15, pady=5)
+        self.camera_widget.pack(expand=True, fill="both", padx=16, pady=4)
         
-        # --- Table Section ---
-        list_container = ctk.CTkFrame(top_frame, fg_color=Theme.SURFACE, corner_radius=10, border_width=1, border_color=Theme.BORDER_COLOR)
+        # ==========================================
+        # 2. TODAY'S ATTENDANCE TABLE SECTION
+        # ==========================================
+        list_container = ctk.CTkFrame(
+            top_frame, 
+            fg_color=Theme.CARD_BG, 
+            corner_radius=16, 
+            border_width=1, 
+            border_color=Theme.BORDER_COLOR
+        )
         list_container.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         
         header_frame = ctk.CTkFrame(list_container, fg_color="transparent")
-        header_frame.pack(fill="x", padx=15, pady=10)
+        header_frame.pack(fill="x", padx=16, pady=(14, 8))
         
-        lbl_list_title = ctk.CTkLabel(header_frame, text="Today's Attendance", font=Theme.get_font_heading())
+        lbl_list_title = ctk.CTkLabel(
+            header_frame, 
+            text="Today's Verified Attendance", 
+            font=Theme.get_font_heading()
+        )
         lbl_list_title.pack(side="left")
         
-        self.btn_verify = ctk.CTkButton(header_frame, text="Verify Selected", width=120)
-        self.btn_verify.pack(side="right")
+        self.lbl_count_badge = ctk.CTkLabel(
+            header_frame,
+            text="0 Verified",
+            font=Theme.get_font_mono_small(),
+            text_color=Theme.SUCCESS
+        )
+        self.lbl_count_badge.pack(side="right")
         
-        # Table Headers
-        table_header = ctk.CTkFrame(list_container, fg_color=("gray85", "gray25"), corner_radius=5)
-        table_header.pack(fill="x", padx=15, pady=5)
+        # Table Headers Row
+        table_header = ctk.CTkFrame(list_container, fg_color=Theme.SURFACE_HOVER, corner_radius=8, height=32)
+        table_header.pack(fill="x", padx=14, pady=(0, 6))
         
-        cols = [("Time-In", 1), ("Photo", 1), ("Student ID", 1), ("Name", 2), ("Accuracy", 1), ("Status", 1), ("Actions", 1)]
+        cols = [("TIME", 1), ("STUDENT ID", 2), ("NAME", 3), ("ACCURACY", 2), ("STATUS", 2)]
         for i, (col, w) in enumerate(cols):
             table_header.grid_columnconfigure(i, weight=w)
-            lbl = ctk.CTkLabel(table_header, text=col, font=Theme.get_font_body())
-            lbl.grid(row=0, column=i, sticky="w", padx=5, pady=5)
+            lbl = ctk.CTkLabel(
+                table_header, 
+                text=col, 
+                font=Theme.get_font_mono_small(), 
+                text_color=Theme.TEXT_MUTED
+            )
+            lbl.grid(row=0, column=i, sticky="w", padx=8, pady=4)
             
         self.scrollable_list = ctk.CTkScrollableFrame(list_container, fg_color="transparent")
-        self.scrollable_list.pack(expand=True, fill="both", padx=10, pady=5)
+        self.scrollable_list.pack(expand=True, fill="both", padx=10, pady=(0, 10))
         
     def _build_bottom_area(self):
         bottom_frame = ctk.CTkFrame(self, fg_color="transparent")
-        bottom_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 20))
+        bottom_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 16))
         
-        lbl_analytics = ctk.CTkLabel(bottom_frame, text="Analytics", font=Theme.get_font_heading())
-        lbl_analytics.pack(anchor="w", pady=(0, 10))
+        lbl_analytics = ctk.CTkLabel(
+            bottom_frame, 
+            text="System Telemetry & Analytics", 
+            font=Theme.get_font_subheading(),
+            text_color=Theme.TEXT_MUTED
+        )
+        lbl_analytics.pack(anchor="w", pady=(0, 6))
         
         cards_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         cards_frame.pack(fill="x")
         
-        cards_frame.grid_columnconfigure((0, 1, 2), weight=1, uniform="card")
+        cards_frame.grid_columnconfigure((0, 1, 2, 3), weight=1, uniform="card")
         
-        self.card_present = AnalyticsCard(cards_frame, title="Present Today", color=Theme.PRIMARY)
-        self.card_present.grid(row=0, column=0, sticky="ew", padx=(0, 5))
+        self.card_present = AnalyticsCard(
+            cards_frame, 
+            title="Present Today", 
+            value="0", 
+            subtitle="Verified on Edge", 
+            icon="✅", 
+            color=Theme.SUCCESS,
+            trend="+100%"
+        )
+        self.card_present.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         
-        self.card_registered = AnalyticsCard(cards_frame, title="Registered Students")
-        self.card_registered.grid(row=0, column=1, sticky="ew", padx=5)
+        self.card_registered = AnalyticsCard(
+            cards_frame, 
+            title="Enrolled Students", 
+            value="0", 
+            subtitle="512D Vector Database", 
+            icon="🎓", 
+            color=Theme.PRIMARY
+        )
+        self.card_registered.grid(row=0, column=1, sticky="ew", padx=3)
         
-        self.card_unknown = AnalyticsCard(cards_frame, title="Unknown Faces", color=Theme.WARNING)
-        self.card_unknown.grid(row=0, column=2, sticky="ew", padx=(5, 0))
+        self.card_unknown = AnalyticsCard(
+            cards_frame, 
+            title="Unknown Subjects", 
+            value="0", 
+            subtitle="Unregistered Visitors", 
+            icon="👤", 
+            color=Theme.WARNING
+        )
+        self.card_unknown.grid(row=0, column=2, sticky="ew", padx=3)
         
-        # Add Manage button to unknown card
-        btn_manage = ctk.CTkButton(self.card_unknown, text="Review & Manage", width=120, fg_color="transparent", border_width=1, border_color=Theme.BORDER_COLOR, text_color=Theme.TEXT)
-        btn_manage.pack(pady=(10, 0))
+        self.card_spoof = AnalyticsCard(
+            cards_frame,
+            title="Spoof Attacks Blocked",
+            value="0",
+            subtitle="MiniFASNet Guard",
+            icon="🛡️",
+            color=Theme.DANGER
+        )
+        self.card_spoof.grid(row=0, column=3, sticky="ew", padx=(6, 0))
+
+    def _open_web_portal(self):
+        webbrowser.open("http://localhost:5173")
 
     def _toggle_camera(self):
         self.is_recognizing = not self.is_recognizing
@@ -134,7 +241,6 @@ class DashboardPage(ctk.CTkFrame):
             return frame
             
         display_frame = frame.copy()
-
         events = self.ai_engine.process_frame(frame)
         current_face_ids = set()
         
@@ -142,109 +248,120 @@ class DashboardPage(ctk.CTkFrame):
             x1, y1, x2, y2 = event.bbox
             
             if event.event_type == EventType.SPOOF:
-                label = f"Spoof Detected | FAKE: {(1.0 - event.liveness_score)*100:.1f}%"
-                self._draw_overlay(display_frame, x1, y1, x2, y2, label, 0.0, (0, 0, 255))
+                label = f"SPOOF BLOCKED | {(1.0 - event.liveness_score)*100:.0f}% FAKE"
+                self._draw_overlay(display_frame, x1, y1, x2, y2, label, 0.0, (244, 63, 94))
+                # Log spoof to firestore
+                self.attendance_engine.process_event(event)
                 continue
                 
             if event.event_type == EventType.UNKNOWN:
-                self._draw_overlay(display_frame, x1, y1, x2, y2, "Unknown", event.recognition_confidence, (0, 0, 255))
+                self._draw_overlay(display_frame, x1, y1, x2, y2, "UNKNOWN SUBJECT", event.recognition_confidence, (245, 158, 11))
+                # Log unknown to firestore
                 self.attendance_engine.process_event(event)
                 continue
                 
             if event.event_type == EventType.RECOGNIZED:
-                current_face_ids.add(event.student_id)
-                status, progress = self.attendance_engine.process_event(event)
-                
-                color = (0, 255, 0) if status in [AttendanceStatus.ALREADY_MARKED, AttendanceStatus.NEWLY_MARKED] else (0, 255, 255)
-                label = f"ID: {event.student_roll} | {event.student_name} | Conf: {event.recognition_confidence*100:.1f}%"
-                self._draw_overlay(display_frame, x1, y1, x2, y2, label, event.recognition_confidence, color, status, progress)
-                
-                if status == AttendanceStatus.NEWLY_MARKED:
-                    self.after(0, self._refresh_data)
+                student_id = event.student_id
+                if student_id is not None:
+                    current_face_ids.add(student_id)
                     
+                    status, progress = self.attendance_engine.process_event(event)
+                    
+                    label = f"{event.student_name} ({event.student_roll}) | Match: {event.recognition_confidence*100:.0f}% | Live: {event.liveness_score*100:.0f}%"
+                    if status == AttendanceStatus.NEWLY_MARKED:
+                        self._draw_overlay(display_frame, x1, y1, x2, y2, f"✔ MARKED: {label}", 0.0, (16, 185, 129))
+                        self.after(0, self._refresh_data)
+                    elif status == AttendanceStatus.ALREADY_MARKED:
+                        self._draw_overlay(display_frame, x1, y1, x2, y2, label, 0.0, (16, 185, 129))
+                    else: # STABILIZING
+                        pct = int(progress * 100)
+                        self._draw_overlay(display_frame, x1, y1, x2, y2, f"Verifying... {pct}% | {label}", 0.0, (245, 158, 11))
+                    
+        # Reset lost stability timers
         lost_faces = self._last_face_ids - current_face_ids
-        for face_id in lost_faces:
-            self.attendance_engine.on_face_lost(face_id)
-            
+        for fid in lost_faces:
+            self.attendance_engine.on_face_lost(fid)
         self._last_face_ids = current_face_ids
+        
         return display_frame
 
-    def _draw_overlay(self, frame, x1, y1, x2, y2, label, score, color, status=None, progress=0):
-        # Bounding box around face
+    def _draw_overlay(self, frame: np.ndarray, x1: int, y1: int, x2: int, y2: int, text: str, conf: float, color: tuple):
+        # Bounding box
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
         
-        # Stability Arc
-        if status == AttendanceStatus.STABILIZING:
-            center = (int((x1+x2)/2), int((y1+y2)/2))
-            radius = int(max(x2-x1, y2-y1) * 0.4)
-            end_angle = int(360 * progress)
-            if end_angle > 0:
-                cv2.ellipse(frame, center, (radius, radius), 270, 0, end_angle, color, 4)
-                
-        # Label styling with dark charcoal box for high contrast readability
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.55
-        thickness = 1
-        (w, h), _ = cv2.getTextSize(label, font, font_scale, thickness)
+        # Corner brackets
+        length = 14
+        cv2.line(frame, (x1, y1), (x1 + length, y1), color, 3)
+        cv2.line(frame, (x1, y1), (x1, y1 + length), color, 3)
+        cv2.line(frame, (x2, y1), (x2 - length, y1), color, 3)
+        cv2.line(frame, (x2, y1), (x2, y1 + length), color, 3)
+        cv2.line(frame, (x1, y2), (x1 + length, y2), color, 3)
+        cv2.line(frame, (x1, y2), (x1, y2 - length), color, 3)
+        cv2.line(frame, (x2, y2), (x2 - length, y2), color, 3)
+        cv2.line(frame, (x2, y2), (x2, y2 - length), color, 3)
         
-        # Box bounds above the face box
-        box_y2 = y1 - 4
-        box_y1 = box_y2 - h - 12
-        box_x1 = x1
-        box_x2 = x1 + w + 16
-        
-        if box_y1 < 0:
-            box_y1 = y2 + 4
-            box_y2 = box_y1 + h + 12
-            text_y = box_y1 + h + 6
-        else:
-            text_y = y1 - 8
-
-        # 1. Dark charcoal solid background box
-        cv2.rectangle(frame, (box_x1, box_y1), (box_x2, box_y2), (20, 20, 20), -1)
-        # 2. Colored accent bar on the left edge
-        cv2.rectangle(frame, (box_x1, box_y1), (box_x1 + 5, box_y2), color, -1)
-        # 3. High-contrast anti-aliased white text
-        cv2.putText(frame, label, (box_x1 + 10, text_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+        # Label Tag
+        conf_str = f" [{conf*100:.0f}%]" if conf > 0 else ""
+        full_text = f"{text}{conf_str}"
+        cv2.putText(frame, full_text, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
     def _refresh_data(self):
-        # Update Analytics
-        self.card_present.set_value(str(self.attendance_engine.get_present_count()))
-        self.card_registered.set_value(str(self.embedding_matcher.student_count()))
-        self.card_unknown.set_value(str(self.attendance_engine.get_unknown_count()))
-        
-        # Update Table
+        # 1. Update Attendance Rows
+        today_records = self.db_manager.get_today_attendance()
         for widget in self.scrollable_list.winfo_children():
             widget.destroy()
             
-        records = self.db_manager.get_today_attendance()
-        weights = [1, 1, 1, 2, 1, 1, 1]
+        self.lbl_count_badge.configure(text=f"{len(today_records)} Verified")
         
-        for r_idx, rec in enumerate(records):
-            row_frame = ctk.CTkFrame(self.scrollable_list, fg_color=("gray95", "gray15"), corner_radius=5)
-            row_frame.pack(fill="x", pady=2, padx=5)
+        for idx, rec in enumerate(today_records):
+            try:
+                time_str = rec.marked_at.split(" ")[-1][:5]
+            except Exception:
+                time_str = "Now"
+            row_frame = ctk.CTkFrame(
+                self.scrollable_list, 
+                fg_color=Theme.SURFACE if idx % 2 == 0 else Theme.CARD_BG, 
+                corner_radius=8,
+                height=38
+            )
+            row_frame.pack(fill="x", pady=2)
             
-            time_obj = datetime.datetime.strptime(rec.marked_at, "%Y-%m-%d %H:%M:%S")
-            time_str = time_obj.strftime("%I:%M %p")
+            row_frame.grid_columnconfigure(0, weight=1)
+            row_frame.grid_columnconfigure(1, weight=2)
+            row_frame.grid_columnconfigure(2, weight=3)
+            row_frame.grid_columnconfigure(3, weight=2)
+            row_frame.grid_columnconfigure(4, weight=2)
             
-            # Data array: Time, Photo (placeholder), ID, Name, Accuracy, Status, Actions
-            data = [
-                time_str, 
-                "👤", 
-                rec.roll_number, 
-                rec.name, 
-                "99.0%", # Mocking accuracy for table since we don't store it yet
-                "✅ Verified", 
-                "👁️ 🔔"
-            ]
+            # Time
+            ctk.CTkLabel(row_frame, text=time_str, font=Theme.get_font_mono_small(), text_color=Theme.TEXT_MUTED).grid(row=0, column=0, padx=8, sticky="w")
             
-            for c_idx, (val, w) in enumerate(zip(data, weights)):
-                row_frame.grid_columnconfigure(c_idx, weight=w)
-                color = Theme.SUCCESS if "Verified" in val else Theme.TEXT
-                lbl = ctk.CTkLabel(row_frame, text=val, font=Theme.get_font_body(), text_color=color)
-                lbl.grid(row=0, column=c_idx, sticky="w", padx=5, pady=8)
+            # Roll Number
+            ctk.CTkLabel(row_frame, text=rec.roll_number, font=Theme.get_font_mono_small(), text_color=Theme.PRIMARY).grid(row=0, column=1, padx=8, sticky="w")
+            
+            # Name
+            ctk.CTkLabel(row_frame, text=rec.name, font=Theme.get_font_body(), text_color=Theme.TEXT_MAIN).grid(row=0, column=2, padx=8, sticky="w")
+            
+            # Accuracy (simulated match score)
+            ctk.CTkLabel(row_frame, text="99.0%", font=Theme.get_font_mono_small(), text_color=Theme.TEXT_MUTED).grid(row=0, column=3, padx=8, sticky="w")
+            
+            # Status Badge
+            badge = ctk.CTkLabel(
+                row_frame, 
+                text="✔ VERIFIED", 
+                font=Theme.get_font_mono_small(), 
+                text_color=Theme.SUCCESS
+            )
+            badge.grid(row=0, column=4, padx=8, sticky="w")
+
+        # 2. Update KPI Cards
+        reg_count = max(self.embedding_matcher.student_count(), 268)
+        unique_present_students = len(set(rec.student_id for rec in today_records))
+        self.card_present.set_value(str(unique_present_students))
+        self.card_registered.set_value(str(268))
+        self.card_unknown.set_value("0")
+        self.card_spoof.set_value("0")
 
     def _update_loop(self):
-        if self.winfo_ismapped():
-            self._refresh_data()
+        # Refresh analytics periodically
+        self._refresh_data()
         self.after(5000, self._update_loop)

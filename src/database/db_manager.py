@@ -89,6 +89,21 @@ class DatabaseManager:
             cursor.execute("SELECT 1 FROM students WHERE roll_number = ?", (roll_number,))
             return cursor.fetchone() is not None
 
+    def update_student_embedding(self, roll_number: str, name: str, department: str, embedding: np.ndarray) -> int:
+        """Updates embedding vector and details for an existing student by roll number."""
+        embedding_bytes = embedding.astype(np.float32).tobytes()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE students SET name = ?, department = ?, embedding = ? WHERE roll_number = ?",
+                (name, department, embedding_bytes, roll_number)
+            )
+            cursor.execute("SELECT id FROM students WHERE roll_number = ?", (roll_number,))
+            row = cursor.fetchone()
+            student_id = row['id'] if row else 1
+            logger.info(f"Updated embedding for student {name} ({roll_number}) with ID {student_id}")
+            return student_id
+
     def get_all_students(self) -> List[StudentRecord]:
         """Retrieves all registered students."""
         students = []
@@ -233,3 +248,56 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get student count: {e}")
             return 0
+
+    def enqueue_offline_item(self, collection: str, data_dict: dict, document_id: Optional[str] = None) -> bool:
+        """Buffers a failed cloud document write locally for automatic retry when online."""
+        try:
+            import json
+            data_json = json.dumps(data_dict)
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "INSERT INTO offline_queue (collection, document_id, data_json) VALUES (?, ?, ?)",
+                    (collection, document_id, data_json)
+                )
+                logger.info(f"Enqueued offline item for collection '{collection}'")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to enqueue offline item: {e}")
+            return False
+
+    def get_offline_items(self, limit: int = 50) -> List[dict]:
+        """Retrieves pending offline documents to flush to Cloud Firestore."""
+        items = []
+        try:
+            import json
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, collection, document_id, data_json, retry_count FROM offline_queue ORDER BY id ASC LIMIT ?",
+                    (limit,)
+                )
+                rows = cursor.fetchall()
+                for row in rows:
+                    items.append({
+                        "id": row["id"],
+                        "collection": row["collection"],
+                        "document_id": row["document_id"],
+                        "data": json.loads(row["data_json"]),
+                        "retry_count": row["retry_count"]
+                    })
+        except Exception as e:
+            logger.error(f"Failed to fetch offline queue items: {e}")
+        return items
+
+    def delete_offline_item(self, item_id: int) -> bool:
+        """Deletes a successfully synced item from the offline queue."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM offline_queue WHERE id = ?", (item_id,))
+                return True
+        except Exception as e:
+            logger.error(f"Failed to delete offline queue item {item_id}: {e}")
+            return False
+

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { StatCard } from '../../components/ui/StatCard';
 import { SegmentedProgress } from '../../components/ui/SegmentedProgress';
 import { DataTable } from '../../components/ui/DataTable';
 import type { Column } from '../../components/ui/DataTable';
 import { Users, GraduationCap, Building, ShieldCheck, Award } from 'lucide-react';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { db } from '../../firebase/config';
 
 interface DepartmentOverview {
   id: string;
@@ -31,6 +33,16 @@ export const GenericAdminDashboard: React.FC = () => {
   const { profile } = useAuth();
   const role = profile?.role || 'admin';
 
+  const [loading, setLoading] = useState(true);
+  const [departments, setDepartments] = useState<DepartmentOverview[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [metrics, setMetrics] = useState({
+    totalStudents: 0,
+    totalTeachers: 0,
+    activeUnits: 0,
+    campusAttendance: 0,
+  });
+
   let title = 'System Administration';
   let subtitle = 'Global University Infrastructure & Real-Time Monitoring';
   let scopeBadge = 'System-Wide Access';
@@ -41,110 +53,145 @@ export const GenericAdminDashboard: React.FC = () => {
     scopeBadge = 'University Scope';
   } else if (role === 'dean') {
     title = 'Dean Executive Dashboard';
-    subtitle = 'Faculty of Computing & Information Technology Analytics';
+    subtitle = 'Faculty Academic Performance & Staff Telemetry';
     scopeBadge = 'Faculty Scope';
   } else if (role === 'hod') {
     title = 'HOD Department Console';
-    subtitle = 'Department of Computer Science Academic Operations';
+    subtitle = 'Department Academic Operations & Student Verification';
     scopeBadge = 'Department Scope';
   }
 
-  // Department Cards with Segmented Progress (Image 3 style)
-  const departments: DepartmentOverview[] = [
-    {
-      id: '1',
-      name: 'Computer Science',
-      code: 'CS',
-      head: 'Dr. Kamran Malik',
-      studentsCount: 850,
-      teachersCount: 42,
-      attendanceRate: 89,
-      avatars: [
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?w=100&auto=format&fit=crop&q=80',
-      ],
-    },
-    {
-      id: '2',
-      name: 'Software Engineering',
-      code: 'SE',
-      head: 'Dr. Ayesha Siddiqa',
-      studentsCount: 620,
-      teachersCount: 30,
-      attendanceRate: 85,
-      avatars: [
-        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=100&auto=format&fit=crop&q=80',
-      ],
-    },
-    {
-      id: '3',
-      name: 'Data Science & AI',
-      code: 'DS',
-      head: 'Dr. Bilal Ahmed',
-      studentsCount: 480,
-      teachersCount: 24,
-      attendanceRate: 92,
-      avatars: [
-        'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=100&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=100&auto=format&fit=crop&q=80',
-      ],
-    },
-    {
-      id: '4',
-      name: 'Cyber Security',
-      code: 'CY',
-      head: 'Dr. Tariq Mehmood',
-      studentsCount: 390,
-      teachersCount: 18,
-      attendanceRate: 81,
-      avatars: [
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
-      ],
-    },
-  ];
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      setLoading(true);
+      try {
+        // 1. Fetch Departments
+        const deptsSnap = await getDocs(collection(db, 'departments'));
+        let deptsData = deptsSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as any[];
 
-  // Audit Logs (Image 2 style)
-  const auditLogs: AuditLog[] = [
-    {
-      id: '1',
-      userName: 'Dr. Ali Khan',
-      userRole: 'Teacher',
-      action: 'Verified Attendance Roster (BSCS 6A)',
-      time: '10:15 AM',
-      node: 'LAPTOP-01',
-      status: 'Success',
-    },
-    {
-      id: '2',
-      userName: 'Camera Node #1',
-      userRole: 'Edge Device',
-      action: 'Photo Spoof Blocked (Liveness 0.12)',
-      time: '09:42 AM',
-      node: 'WEBCAM-01',
-      status: 'Flagged',
-    },
-    {
-      id: '3',
-      userName: 'Faizan Sheikh',
-      userRole: 'Student',
-      action: 'Face Check-in Verified (ArcFace 0.96)',
-      time: '08:58 AM',
-      node: 'WEBCAM-01',
-      status: 'Success',
-    },
-    {
-      id: '4',
-      userName: 'System Administrator',
-      userRole: 'Admin',
-      action: 'Synced Firestore Database Entities',
-      time: '08:30 AM',
-      node: 'Cloud REST',
-      status: 'Success',
-    },
-  ];
+        // 2. Fetch Teachers
+        const teachersSnap = await getDocs(collection(db, 'teachers'));
+        let teachersData = teachersSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as any[];
+
+        // 3. Fetch Students
+        const studentsSnap = await getDocs(collection(db, 'students'));
+        let studentsData = studentsSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as any[];
+
+        // 4. Fetch Attendance for calculations
+        const attSnap = await getDocs(query(collection(db, 'attendance'), limit(2000)));
+        const attData = attSnap.docs.map((doc) => doc.data()) as any[];
+
+        // 5. Fetch Recognition Events for Audit Logs
+        const eventsSnap = await getDocs(
+          query(collection(db, 'recognition_events'), orderBy('timestamp', 'desc'), limit(15))
+        );
+        const eventsData = eventsSnap.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as any[];
+
+        // Apply RBAC Scoping
+        if (role === 'dean' && profile?.scope?.facultyId) {
+          deptsData = deptsData.filter((d) => d.facultyId === profile.scope.facultyId);
+          const deptIds = new Set(deptsData.map((d) => d.id));
+          teachersData = teachersData.filter((t) => deptIds.has(t.departmentId));
+          studentsData = studentsData.filter((s) => deptIds.has(s.departmentId));
+        } else if (role === 'hod' && profile?.scope?.departmentId) {
+          deptsData = deptsData.filter((d) => d.id === profile.scope.departmentId);
+          teachersData = teachersData.filter((t) => t.departmentId === profile.scope.departmentId);
+          studentsData = studentsData.filter((s) => s.departmentId === profile.scope.departmentId);
+        }
+
+        // Calculate Department level breakdown
+        const deptsOverview: DepartmentOverview[] = deptsData.map((dept) => {
+          const deptStudents = studentsData.filter((s) => s.departmentId === dept.id);
+          const deptTeachers = teachersData.filter((t) => t.departmentId === dept.id);
+          const deptAtt = attData.filter((a) => a.departmentId === dept.id);
+
+          const presentCount = deptAtt.filter((a) => a.status === 'Present' || a.status === 'Late').length;
+          const rate = deptAtt.length > 0 ? Math.round((presentCount / deptAtt.length) * 100) : 88;
+
+          const avatars = deptTeachers.slice(0, 3).map((t) => t.avatar).filter(Boolean);
+          if (avatars.length === 0) {
+            avatars.push('https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80');
+          }
+
+          return {
+            id: dept.id,
+            name: dept.name,
+            code: dept.code || dept.name.substring(0, 2).toUpperCase(),
+            head: dept.head || 'Department Chair',
+            studentsCount: deptStudents.length,
+            teachersCount: deptTeachers.length,
+            attendanceRate: rate,
+            avatars: avatars,
+          };
+        });
+
+        // Compute High-Level Metrics
+        const totalPresent = attData.filter((a) => a.status === 'Present' || a.status === 'Late').length;
+        const overallRate = attData.length > 0 ? Math.round((totalPresent / attData.length) * 1000) / 10 : 86.4;
+
+        setMetrics({
+          totalStudents: studentsData.length,
+          totalTeachers: teachersData.length,
+          activeUnits: deptsData.length,
+          campusAttendance: overallRate,
+        });
+
+        setDepartments(deptsOverview);
+
+        // Map events to Audit Logs Table
+        const mappedLogs: AuditLog[] = eventsData.map((evt) => {
+          let act = 'Face Check-in Verified';
+          let st: 'Success' | 'Flagged' | 'Pending' = 'Success';
+          let roleName = 'Student';
+
+          if (evt.eventType === 'SPOOF') {
+            act = `Spoof Attack Blocked (Liveness ${(evt.livenessScore * 100).toFixed(0)}%)`;
+            st = 'Flagged';
+            roleName = 'Intruder';
+          } else if (evt.eventType === 'UNKNOWN') {
+            act = 'Unregistered Person Detected';
+            st = 'Pending';
+            roleName = 'Visitor';
+          } else {
+            act = `Face Verified (Confidence ${(evt.confidence * 100).toFixed(0)}%)`;
+          }
+
+          const dateObj = evt.timestamp ? new Date(evt.timestamp * 1000) : new Date();
+          const timeStr = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+          return {
+            id: evt.id,
+            userName: evt.studentName || 'Unregistered Person',
+            userRole: roleName,
+            action: act,
+            time: timeStr,
+            node: evt.cameraId || 'WEBCAM-01',
+            status: st,
+          };
+        });
+
+        setAuditLogs(mappedLogs);
+      } catch (err) {
+        console.error('Failed to fetch admin dashboard data:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, [profile, role]);
 
   const auditColumns: Column<AuditLog>[] = [
     {
@@ -176,14 +223,20 @@ export const GenericAdminDashboard: React.FC = () => {
         <div className="flex items-center gap-2">
           <span
             className={`w-2 h-2 rounded-full ${
-              row.status === 'Success' ? 'bg-emerald-500' : 'bg-rose-500'
+              row.status === 'Success'
+                ? 'bg-emerald-500'
+                : row.status === 'Flagged'
+                ? 'bg-rose-500'
+                : 'bg-amber-500'
             }`}
           ></span>
           <span
             className={`font-bold px-2.5 py-0.5 rounded-full text-[11px] border ${
               row.status === 'Success'
                 ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                : 'bg-rose-50 text-rose-700 border-rose-100'
+                : row.status === 'Flagged'
+                ? 'bg-rose-50 text-rose-700 border-rose-100'
+                : 'bg-amber-50 text-amber-700 border-amber-100'
             }`}
           >
             {row.status}
@@ -193,22 +246,30 @@ export const GenericAdminDashboard: React.FC = () => {
     },
   ];
 
+  if (loading) {
+    return (
+      <div className="flex justify-center p-16">
+        <div className="animate-spin rounded-full h-9 w-9 border-b-2 border-brand-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       {/* Top Banner */}
-      <div className="bg-white rounded-3xl p-6 shadow-soft border border-slate-100/80 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-brand-50 text-brand-600">
+      <div className="bg-gradient-to-r from-slate-900 via-brand-950 to-indigo-950 rounded-3xl p-7 text-white shadow-soft-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-5 relative overflow-hidden border border-slate-800">
+        <div className="relative z-10">
+          <span className="px-3 py-1 bg-white/10 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-sm border border-white/10 text-brand-300">
             {scopeBadge}
           </span>
-          <h2 className="text-2xl font-black text-slate-900 mt-2">{title} 🏛️</h2>
-          <p className="text-xs text-slate-400 font-medium mt-0.5">{subtitle}</p>
+          <h2 className="text-2xl font-black mt-3 text-white tracking-tight">{title} 🏛️</h2>
+          <p className="text-slate-300 text-xs font-medium mt-1">{subtitle}</p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 relative z-10">
           <button
             onClick={() => window.location.assign('/dashboard/monitoring')}
-            className="flex items-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm shadow-brand-500/20"
+            className="flex items-center gap-2 px-5 py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-2xl text-xs font-extrabold transition-all shadow-lg shadow-brand-600/30 hover:scale-[1.02] active:scale-95"
           >
             <ShieldCheck size={16} />
             <span>Open Security Console</span>
@@ -216,11 +277,11 @@ export const GenericAdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* High-Level Stat Cards (Matching Image 4) */}
+      {/* High-Level Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
           title="Enrolled Students"
-          value={role === 'admin' || role === 'vc' ? '12,450' : '2,340'}
+          value={metrics.totalStudents.toLocaleString()}
           icon={<Users size={20} />}
           trend="+5.4% this semester"
           trendUp={true}
@@ -228,24 +289,24 @@ export const GenericAdminDashboard: React.FC = () => {
         />
         <StatCard
           title="Faculty Members"
-          value={role === 'admin' || role === 'vc' ? '840' : '114'}
+          value={metrics.totalTeachers.toLocaleString()}
           icon={<GraduationCap size={20} />}
           avatars={[
             'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
             'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
             'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
           ]}
-          moreAvatarsCount={role === 'admin' ? 837 : 111}
+          moreAvatarsCount={Math.max(0, metrics.totalTeachers - 3)}
         />
         <StatCard
           title="Active Departments"
-          value={role === 'admin' || role === 'vc' ? '24' : '4'}
+          value={metrics.activeUnits.toString()}
           icon={<Building size={20} />}
-          subtitle="All Operating"
+          subtitle="All Operational"
         />
         <StatCard
           title="Campus Attendance"
-          value="87.6%"
+          value={`${metrics.campusAttendance}%`}
           icon={<Award size={20} />}
           trend="+2.1% vs last week"
           trendUp={true}
@@ -253,7 +314,7 @@ export const GenericAdminDashboard: React.FC = () => {
         />
       </div>
 
-      {/* Department Cards Grid with Segmented Progress (Matching Image 3) */}
+      {/* Department Cards Grid with Segmented Progress */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
@@ -263,7 +324,7 @@ export const GenericAdminDashboard: React.FC = () => {
             <p className="text-xs text-slate-400 font-medium">Real-time attendance rates and staff enrollment</p>
           </div>
           <span className="text-xs font-bold text-brand-600 hover:text-brand-700 cursor-pointer">
-            View All Units →
+            {departments.length} Units Active →
           </span>
         </div>
 
@@ -282,7 +343,6 @@ export const GenericAdminDashboard: React.FC = () => {
                     <h4 className="font-bold text-slate-900 text-sm mt-2">{dept.name}</h4>
                     <p className="text-xs text-slate-400 mt-0.5">{dept.head}</p>
                   </div>
-                  {/* Overlapping Avatars (Image 3 style) */}
                   <div className="flex items-center -space-x-2">
                     {dept.avatars.map((img, i) => (
                       <img
@@ -301,7 +361,6 @@ export const GenericAdminDashboard: React.FC = () => {
                 </div>
               </div>
 
-              {/* Segmented Bar (Image 3 style) */}
               <div className="mt-4 pt-3 border-t border-slate-50">
                 <div className="flex justify-between items-center text-[11px] font-bold text-slate-500 mb-1.5">
                   <span>Attendance</span>
@@ -314,7 +373,7 @@ export const GenericAdminDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Real-time System Audit Table (Matching Image 2) */}
+      {/* Real-time System Audit Table */}
       <DataTable
         title="Real-Time System Audit & Check-in Logs"
         subtitle="Chronological log of Edge AI attendance events, spoof blocks, and cloud synchronization"

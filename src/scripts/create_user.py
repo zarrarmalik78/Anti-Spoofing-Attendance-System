@@ -88,11 +88,11 @@ if __name__ == "__main__":
     # HOD
     create_user("hod@university.edu", "password123", "HOD Computer Science", "hod", scope={"departmentId": "dept-cs-01"}, entity_id="dept-cs-01")
     
-    # Teacher (Linking to the teacher created in Phase 3 seed)
-    create_user("ali.khan@university.edu", "password123", "Ali Khan", "teacher", scope={"departmentId": "dept-cs-01"}, entity_id="teacher-ali-01")
+    # Teacher (Linking to teacher-ali-01)
+    create_user("ali.khan@university.edu", "password123", "Dr. Ali Khan", "teacher", scope={"departmentId": "dept-cs-01", "teacherId": "teacher-ali-01"}, entity_id="teacher-ali-01")
     
-    # Student (Linking to the student created in Phase 3 seed)
-    create_user("fa23-bcs-001@university.edu", "password123", "Student 1", "student", scope={"studentId": "student-test-01"}, entity_id="student-test-01")
+    # Student (Linking to student-test-01)
+    create_user("fa23-bcs-001@university.edu", "password123", "Darrell Steward", "student", scope={"studentId": "FA23-BCS-001"}, entity_id="student-test-01")
     
     # Disabled User Test
     firebase = FirebaseService()

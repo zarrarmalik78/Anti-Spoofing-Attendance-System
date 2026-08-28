@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
@@ -6,6 +6,7 @@ import { ChevronRight } from 'lucide-react';
 
 export const DashboardLayout: React.FC = () => {
   const location = useLocation();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Generate breadcrumbs from path
   const pathSegments = location.pathname.split('/').filter(Boolean);
@@ -16,14 +17,14 @@ export const DashboardLayout: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F4F6FA] flex">
       {/* Sidebar */}
-      <Sidebar />
+      <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col ml-64">
-        <Topbar />
+      <div className="flex-1 flex flex-col lg:ml-64 min-w-0">
+        <Topbar onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)} />
 
-        <main className="flex-1 px-8 pt-24 pb-12 overflow-y-auto max-w-7xl w-full mx-auto">
-          {/* Dynamic Breadcrumbs (Matching Image 1 & 2 "Dashboards > Message Center" style) */}
+        <main className="flex-1 px-4 sm:px-8 pt-24 pb-12 overflow-y-auto max-w-7xl w-full mx-auto min-w-0">
+          {/* Dynamic Breadcrumbs */}
           <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 mb-6">
             <span>Portal</span>
             {breadcrumbs.map((crumb, idx) => (

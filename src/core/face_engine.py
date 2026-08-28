@@ -83,12 +83,13 @@ class FaceEngine:
                 else:
                     is_live, liveness_score = True, 1.0
                 
-                if is_live:
-                    # 3. Recognition (Embedding generation)
-                    # Run other models (alignment, recognition)
-                    for model_name, model in self._app.models.items():
-                        if model_name != 'detection':
+                # 3. Recognition (Embedding generation for identity matching)
+                for model_name, model in self._app.models.items():
+                    if model_name != 'detection':
+                        try:
                             model.get(frame, face)
+                        except Exception as e:
+                            logger.warning(f"Model {model_name} failed on face: {e}")
                 
                 results.append(FaceResult.from_insightface(face, is_live, liveness_score))
                 

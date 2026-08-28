@@ -8,8 +8,20 @@ import { StudentDashboard } from './pages/dashboards/StudentDashboard';
 import { TeacherDashboard } from './pages/dashboards/TeacherDashboard';
 import { GenericAdminDashboard } from './pages/dashboards/GenericAdminDashboard';
 import { LiveMonitoring } from './pages/LiveMonitoring';
+import { StudentsPage } from './pages/StudentsPage';
+import { TeachersPage } from './pages/TeachersPage';
+import { UsersPage } from './pages/UsersPage';
+import { AcademicUnitsPage } from './pages/AcademicUnitsPage';
+import { CoursesClassesPage } from './pages/CoursesClassesPage';
+import { AttendancePage } from './pages/AttendancePage';
+import { ReportsPage } from './pages/ReportsPage';
+import { ProfilePage } from './pages/ProfilePage';
 
-const Unauthorized = () => <div className="p-8 text-center text-red-600 font-bold text-2xl">Unauthorized Access</div>;
+const Unauthorized = () => (
+  <div className="p-8 text-center text-rose-600 font-bold text-2xl">
+    Unauthorized Access — Restricted Institutional Scope
+  </div>
+);
 
 function App() {
   return (
@@ -26,16 +38,13 @@ function App() {
               {/* Fallback */}
               <Route index element={<Navigate to="profile" replace />} />
               
+              {/* Role Dashboards */}
               <Route path="student" element={<ProtectedRoute allowedRoles={['student']} />}>
                 <Route index element={<StudentDashboard />} />
-                <Route path="attendance" element={<div>My Attendance</div>} />
-                <Route path="classes" element={<div>My Classes</div>} />
               </Route>
               
               <Route path="teacher" element={<ProtectedRoute allowedRoles={['teacher']} />}>
                 <Route index element={<TeacherDashboard />} />
-                <Route path="classes" element={<div>My Classes</div>} />
-                <Route path="students" element={<div>My Students</div>} />
               </Route>
               
               <Route path="hod" element={<ProtectedRoute allowedRoles={['hod']} />}>
@@ -52,12 +61,37 @@ function App() {
 
               <Route path="admin" element={<ProtectedRoute allowedRoles={['admin']} />}>
                 <Route index element={<GenericAdminDashboard />} />
-                <Route path="users" element={<div>Manage Users</div>} />
               </Route>
               
-              <Route path="profile" element={<div>Profile Page</div>} />
-              <Route path="reports" element={<div>Reports Page</div>} />
-              <Route path="monitoring" element={<LiveMonitoring />} />
+              {/* University Management Pages */}
+              <Route path="students" element={<ProtectedRoute allowedRoles={['admin', 'vc', 'dean', 'hod', 'teacher']} />}>
+                <Route index element={<StudentsPage />} />
+              </Route>
+
+              <Route path="teachers" element={<ProtectedRoute allowedRoles={['admin', 'vc', 'dean', 'hod']} />}>
+                <Route index element={<TeachersPage />} />
+              </Route>
+
+              <Route path="users" element={<ProtectedRoute allowedRoles={['admin', 'vc', 'dean', 'hod']} />}>
+                <Route index element={<UsersPage />} />
+              </Route>
+
+              <Route path="academic-units" element={<ProtectedRoute allowedRoles={['admin', 'vc', 'dean', 'hod']} />}>
+                <Route index element={<AcademicUnitsPage />} />
+              </Route>
+
+              <Route path="courses-classes" element={<CoursesClassesPage />} />
+              <Route path="attendance" element={<AttendancePage />} />
+              
+              <Route path="reports" element={<ProtectedRoute allowedRoles={['admin', 'vc', 'dean', 'hod']} />}>
+                <Route index element={<ReportsPage />} />
+              </Route>
+
+              <Route path="monitoring" element={<ProtectedRoute allowedRoles={['admin', 'vc', 'dean', 'hod', 'teacher']} />}>
+                <Route index element={<LiveMonitoring />} />
+              </Route>
+
+              <Route path="profile" element={<ProfilePage />} />
             </Route>
           </Route>
         </Routes>

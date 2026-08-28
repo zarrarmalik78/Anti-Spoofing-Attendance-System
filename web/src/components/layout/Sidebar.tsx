@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
@@ -9,31 +9,32 @@ import {
   Settings,
   Activity,
   LogOut,
-  ChevronDown,
-  ChevronRight,
   Sparkles,
-  Camera
+  Camera,
+  X
 } from 'lucide-react';
 import { auth } from '../../firebase/config';
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ isOpen = false, onClose }) => {
   const { profile } = useAuth();
-  const [openAccordions, setOpenAccordions] = useState<Record<string, boolean>>({
-    Academic: true,
-    Management: true,
-    System: false,
-  });
 
   if (!profile) return null;
 
   const role = profile.role;
 
-  const toggleAccordion = (name: string) => {
-    setOpenAccordions(prev => ({ ...prev, [name]: !prev[name] }));
-  };
-
   const handleLogout = () => {
     auth.signOut();
+  };
+
+  const handleNavClick = () => {
+    if (onClose) {
+      onClose();
+    }
   };
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -44,21 +45,45 @@ export const Sidebar: React.FC = () => {
     }`;
 
   return (
-    <aside className="w-64 bg-white h-screen border-r border-slate-100 flex flex-col fixed left-0 top-0 z-30 select-none">
-      {/* Brand Header */}
-      <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/30">
-            <Sparkles size={20} className="animate-pulse" />
+    <>
+      {/* Mobile Backdrop Overlay */}
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-40 lg:hidden animate-fade-in"
+          onClick={onClose}
+        />
+      )}
+
+      <aside
+        className={`w-64 bg-white h-screen border-r border-slate-100 flex flex-col fixed left-0 top-0 z-50 select-none transition-transform duration-300 ${
+          isOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full lg:translate-x-0'
+        }`}
+      >
+        {/* Brand Header */}
+        <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-brand-600 text-white flex items-center justify-center shadow-md shadow-brand-500/30">
+              <Sparkles size={20} className="animate-pulse" />
+            </div>
+            <div>
+              <h1 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-1.5">
+                Edge AI <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.5 rounded bg-brand-100 text-brand-700">OS</span>
+              </h1>
+              <p className="text-[11px] font-medium text-slate-400">Biometric Attendance</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-base font-black text-slate-900 tracking-tight flex items-center gap-1.5">
-              Host Node <span className="text-[10px] uppercase font-extrabold px-1.5 py-0.5 rounded bg-brand-100 text-brand-700">AI</span>
-            </h1>
-            <p className="text-[11px] font-medium text-slate-400">Attendance Portal</p>
-          </div>
+
+          {/* Close button for Mobile */}
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="lg:hidden p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+              aria-label="Close sidebar"
+            >
+              <X size={18} />
+            </button>
+          )}
         </div>
-      </div>
 
       {/* Navigation Links */}
       <div className="flex-1 px-4 py-4 space-y-5 overflow-y-auto">
@@ -67,7 +92,7 @@ export const Sidebar: React.FC = () => {
           <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
             Main
           </p>
-          <NavLink to={`/dashboard/${role}`} className={linkClass} end>
+          <NavLink to={`/dashboard/${role}`} onClick={handleNavClick} className={linkClass} end>
             <div className="flex items-center gap-3">
               <LayoutDashboard size={18} />
               <span>Dashboard</span>
@@ -75,20 +100,20 @@ export const Sidebar: React.FC = () => {
           </NavLink>
         </div>
 
-        {/* Role Specific Sections */}
+        {/* Student Specific */}
         {role === 'student' && (
           <div>
             <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
               My Academic
             </p>
             <div className="space-y-1">
-              <NavLink to="/dashboard/student/attendance" className={linkClass}>
+              <NavLink to="/dashboard/attendance" className={linkClass}>
                 <div className="flex items-center gap-3">
                   <CalendarCheck size={18} />
                   <span>My Attendance</span>
                 </div>
               </NavLink>
-              <NavLink to="/dashboard/student/classes" className={linkClass}>
+              <NavLink to="/dashboard/courses-classes" className={linkClass}>
                 <div className="flex items-center gap-3">
                   <BookOpen size={18} />
                   <span>Enrolled Classes</span>
@@ -98,57 +123,107 @@ export const Sidebar: React.FC = () => {
           </div>
         )}
 
+        {/* Teacher Specific */}
         {role === 'teacher' && (
           <div>
             <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
               Teaching Scope
             </p>
             <div className="space-y-1">
-              <NavLink to="/dashboard/teacher/classes" className={linkClass}>
+              <NavLink to="/dashboard/courses-classes" className={linkClass}>
                 <div className="flex items-center gap-3">
                   <BookOpen size={18} />
                   <span>Assigned Classes</span>
                 </div>
               </NavLink>
-              <NavLink to="/dashboard/teacher/students" className={linkClass}>
+              <NavLink to="/dashboard/students" className={linkClass}>
                 <div className="flex items-center gap-3">
                   <Users size={18} />
                   <span>Class Rosters</span>
+                </div>
+              </NavLink>
+              <NavLink to="/dashboard/attendance" className={linkClass}>
+                <div className="flex items-center gap-3">
+                  <CalendarCheck size={18} />
+                  <span>Attendance Logs</span>
                 </div>
               </NavLink>
             </div>
           </div>
         )}
 
+        {/* Academic Hierarchy & Administration (HOD, Dean, VC, Admin) */}
         {['hod', 'dean', 'vc', 'admin'].includes(role) && (
-          <div>
-            <div
-              onClick={() => toggleAccordion('Academic')}
-              className="flex items-center justify-between px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2 cursor-pointer hover:text-slate-700 transition-colors"
-            >
-              <span>University Structure</span>
-              {openAccordions['Academic'] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-            </div>
-
-            {openAccordions['Academic'] && (
-              <div className="space-y-1 pl-1">
-                <NavLink to="/dashboard/reports" className={linkClass}>
+          <>
+            {/* University Structure */}
+            <div>
+              <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
+                University Structure
+              </p>
+              <div className="space-y-1">
+                <NavLink to="/dashboard/academic-units" className={linkClass}>
                   <div className="flex items-center gap-3">
-                    <CalendarCheck size={18} />
-                    <span>Attendance Analytics</span>
+                    <BookOpen size={18} />
+                    <span>Academic Units</span>
                   </div>
                 </NavLink>
-                {role === 'admin' && (
-                  <NavLink to="/dashboard/admin/users" className={linkClass}>
-                    <div className="flex items-center gap-3">
-                      <Users size={18} />
-                      <span>Manage Users</span>
-                    </div>
-                  </NavLink>
-                )}
+                <NavLink to="/dashboard/courses-classes" className={linkClass}>
+                  <div className="flex items-center gap-3">
+                    <CalendarCheck size={18} />
+                    <span>Courses & Classes</span>
+                  </div>
+                </NavLink>
               </div>
-            )}
-          </div>
+            </div>
+
+            {/* People & Roles */}
+            <div>
+              <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
+                People & Access
+              </p>
+              <div className="space-y-1">
+                <NavLink to="/dashboard/students" className={linkClass}>
+                  <div className="flex items-center gap-3">
+                    <Users size={18} />
+                    <span>Students</span>
+                  </div>
+                </NavLink>
+                <NavLink to="/dashboard/teachers" className={linkClass}>
+                  <div className="flex items-center gap-3">
+                    <Users size={18} />
+                    <span>Faculty Staff</span>
+                  </div>
+                </NavLink>
+                <NavLink to="/dashboard/users" className={linkClass}>
+                  <div className="flex items-center gap-3">
+                    <Settings size={18} />
+                    <span>Manage Users & RBAC</span>
+                  </div>
+                </NavLink>
+              </div>
+            </div>
+
+            {/* Attendance & Analytics */}
+            <div>
+              <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
+                Attendance & Reports
+              </p>
+              <div className="space-y-1">
+                <NavLink to="/dashboard/attendance" className={linkClass}>
+                  <div className="flex items-center gap-3">
+                    <CalendarCheck size={18} />
+                    <span>Attendance Explorer</span>
+                  </div>
+                </NavLink>
+                <NavLink to="/dashboard/reports" className={linkClass}>
+                  <div className="flex items-center gap-3">
+                    <Activity size={18} />
+                    <span>Analytics & Reports</span>
+                  </div>
+                </NavLink>
+              </div>
+            </div>
+          </>
         )}
 
         {/* Live Security & Operations */}
@@ -167,7 +242,7 @@ export const Sidebar: React.FC = () => {
           </div>
         )}
 
-        {/* Account Section */}
+        {/* Account Settings */}
         <div>
           <p className="px-3 text-[10px] font-extrabold text-slate-400 uppercase tracking-wider mb-2">
             Settings
@@ -219,5 +294,6 @@ export const Sidebar: React.FC = () => {
         </button>
       </div>
     </aside>
+    </>
   );
 };
